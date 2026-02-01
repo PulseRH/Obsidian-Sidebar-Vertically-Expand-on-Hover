@@ -18,7 +18,7 @@ An Obsidian plugin that expands individual sidebar workspace tab containers (lik
 3. Enable the plugin in Community Plugins
 
 ### Method 2: Manual Installation
-1.dowwnlaod release zip file
+1.download release zip file
 2.drop it in your .Obsidian/plugins folder easly accessed by navigating obsidian settings comunity plugins and clicking the open compunity plugins folder icon button on the right
 3. Enable the plugin in Community Plugins
 
