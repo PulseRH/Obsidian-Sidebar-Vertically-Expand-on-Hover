@@ -7,10 +7,7 @@ An Obsidian plugin that expands individual sidebar workspace tab containers (lik
 - Smooth vertical expansion animation on hover
 - Expands only the individual tab container you're hovering over (not all containers)
 - Automatically moves resize handles to accommodate expansion
-- Works independently for each tab container in both left and right sidebars
 - Configurable expansion height (minimum and maximum)
-- Non-intrusive - maintains all sidebar functionality
-- Respects screen boundaries (can't expand beyond viewport)
 
 ## Installation
 
