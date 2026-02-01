@@ -14,7 +14,19 @@ An Obsidian plugin that expands individual sidebar workspace tab containers (lik
 
 ## Installation
 
-### Method 1: Manual Installation (Development)
+### Method 1: Using BRAT (Beta Reviewers Auto-update Tool)
+
+1. Install the BRAT plugin from Community Plugins
+2. Add this repository to BRAT
+3. Enable the plugin in Community Plugins
+
+### Method 2: Manual Installation
+1.dowwnlaod release zip file
+2.drop it in your .Obsidian/plugins folder easly accessed by navigating obsidian settings comunity plugins and clicking the open compunity plugins folder icon button on the right
+3. Enable the plugin in Community Plugins
+
+
+### Method 3: Build your own(Development)
 
 1. **Clone or download this repository**
    ```bash
@@ -43,11 +55,7 @@ An Obsidian plugin that expands individual sidebar workspace tab containers (lik
    - Go to **Community plugins**
    - Find **Sidebar Expand on Hover** and toggle it on
 
-### Method 2: Using BRAT (Beta Reviewers Auto-update Tool)
 
-1. Install the BRAT plugin from Community Plugins
-2. Add this repository to BRAT
-3. Enable the plugin in Community Plugins
 
 ## Development
 
