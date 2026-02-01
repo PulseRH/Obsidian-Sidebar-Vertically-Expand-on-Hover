@@ -1,0 +1,18 @@
+{
+	"id": "sidebar-expand-on-hover",
+	"name": "Sidebar Vertically Expand on Hover",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Expands individual sidebar workspace tab containers vertically on hover, with resize handles moving to accommodate the expansion.",
+	"author": "Your Name",
+	"authorUrl": "",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
+
+
+
+
+
+
+

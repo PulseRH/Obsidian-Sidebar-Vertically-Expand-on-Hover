@@ -1,0 +1,29 @@
+/* Obsidian Individual Sidebar Tab Container Vertical Expansion on Hover */
+
+/* Smooth transitions for expansion - only applied to enable smooth animation */
+.workspace-split.mod-left-split .workspace-tab-container,
+.workspace-split.mod-right-split .workspace-tab-container,
+.workspace-split.mod-left-split .workspace-tabs .workspace-leaf,
+.workspace-split.mod-right-split .workspace-tabs .workspace-leaf {
+    transition: min-height 0.3s ease, max-height 0.3s ease !important;
+}
+
+/* Expand individual tab container when hovering over it - left sidebar */
+.workspace-split.mod-left-split .workspace-tab-container:hover {
+    min-height: var(--tab-container-expanded-height, 600px) !important;
+    max-height: var(--tab-container-max-expanded-height, 80vh) !important;
+}
+
+/* Expand individual tab container when hovering over it - right sidebar */
+.workspace-split.mod-right-split .workspace-tab-container:hover {
+    min-height: var(--tab-container-expanded-height, 600px) !important;
+    max-height: var(--tab-container-max-expanded-height, 80vh) !important;
+}
+
+/* Expand workspace-leaf when hovering over it */
+.workspace-split.mod-left-split .workspace-tabs .workspace-leaf:hover,
+.workspace-split.mod-right-split .workspace-tabs .workspace-leaf:hover {
+    min-height: var(--tab-container-expanded-height, 600px) !important;
+    max-height: var(--tab-container-max-expanded-height, 80vh) !important;
+}
+

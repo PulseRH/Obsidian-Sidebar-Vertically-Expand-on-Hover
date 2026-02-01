@@ -1,0 +1,90 @@
+/* Transitions for smooth shifting with GPU acceleration */
+/* Only apply transitions to elements inside a sidebar split we are managing */
+.sidebar-expand-split-parent .workspace-tabs, 
+.sidebar-expand-split-parent .workspace-leaf,
+.sidebar-expand-split-parent .nn-navigation-pane,
+.sidebar-expand-split-parent .nn-list-pane,
+.sidebar-expand-split-parent .workspace-split,
+.sidebar-expand-split-parent .nn-split-container,
+.sidebar-expand-hovered,
+.sidebar-expand-shrunk {
+    transition: flex var(--sidebar-expand-transition-duration, 300ms) ease, min-height var(--sidebar-expand-transition-duration, 300ms) ease, height var(--sidebar-expand-transition-duration, 300ms) ease !important;
+    will-change: flex, min-height, height;
+}
+
+/* Ensure resize handles move smoothly with the expansion */
+.sidebar-expand-split-parent .workspace-leaf-resize-handle,
+.sidebar-expand-split-parent .nn-resizer-handle,
+.sidebar-expand-split-parent .nn-resize-handle {
+    transition: top var(--sidebar-expand-transition-duration, 300ms) ease, bottom var(--sidebar-expand-transition-duration, 300ms) ease, transform var(--sidebar-expand-transition-duration, 300ms) ease !important;
+    will-change: top, bottom, transform;
+}
+
+/* Exclude vault profile from transitions - prevent animation flicker */
+/* Only apply when inside a managed sidebar container */
+.sidebar-expand-split-parent .workspace-sidedock-vault-profile,
+.sidebar-expand-split-parent .workspace-drawer-vault-profile,
+.sidebar-expand-split-parent .workspace-drawer-bottom,
+.sidebar-expand-split-parent [class*="vault-profile"],
+.sidebar-expand-split-parent .workspace-sidedock-vault-profile *,
+.sidebar-expand-split-parent .workspace-drawer-vault-profile *,
+.sidebar-expand-split-parent .workspace-drawer-bottom *,
+.sidebar-expand-split-parent [class*="vault-profile"] * {
+    transition: none !important;
+}
+
+/* Prevent transitions on workspace-split containers that contain vault profile */
+.sidebar-expand-split-parent.workspace-split:has(.workspace-sidedock-vault-profile),
+.sidebar-expand-split-parent.workspace-split:has(.workspace-drawer-vault-profile),
+.sidebar-expand-split-parent.workspace-split:has([class*="vault-profile"]) {
+    transition: none !important;
+}
+
+/* Ensure parents don't clip the expansion */
+.sidebar-expand-split-parent {
+    overflow: visible !important;
+}
+
+/* Prevent sidebar-expand-split-parent from affecting vault profile containers */
+.sidebar-expand-split-parent:has(.workspace-sidedock-vault-profile),
+.sidebar-expand-split-parent:has(.workspace-drawer-vault-profile),
+.sidebar-expand-split-parent:has([class*="vault-profile"]),
+[data-sidebar-expand-vault-parent="true"] {
+    transition: none !important;
+}
+
+[data-sidebar-expand-vault-parent="true"] * {
+    transition: none !important;
+}
+
+/* Shrunk state for siblings - let JavaScript control flex values */
+.sidebar-expand-shrunk {
+    overflow: hidden !important;
+}
+
+/* Explicitly lock vault profile elements - ONLY when inside a managed container */
+.sidebar-expand-split-parent .workspace-sidedock-vault-profile,
+.sidebar-expand-split-parent .workspace-drawer-vault-profile,
+.sidebar-expand-split-parent .workspace-drawer-bottom,
+.sidebar-expand-split-parent [class*="vault-profile"] {
+    flex: 0 0 auto !important;
+    flex-grow: 0 !important;
+	flex-shrink: 0 !important;
+    flex-basis: auto !important;
+    min-height: auto !important;
+    max-height: fit-content !important;
+    height: fit-content !important;
+    box-sizing: border-box !important;
+    transition: none !important;
+    animation: none !important;
+}
+
+/* More specific override for any flex containers containing vault profile */
+.sidebar-expand-split-parent.workspace-split:has(.workspace-sidedock-vault-profile) > .workspace-sidedock-vault-profile,
+.sidebar-expand-split-parent.workspace-split:has(.workspace-drawer-vault-profile) > .workspace-drawer-vault-profile {
+    flex: 0 0 auto !important;
+	flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    height: fit-content !important;
+    transition: none !important;
+}
