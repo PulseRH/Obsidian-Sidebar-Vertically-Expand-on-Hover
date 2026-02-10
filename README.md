@@ -57,51 +57,11 @@ To develop this plugin:
 4. Make changes to `main.ts`
 5. Reload the plugin in Obsidian (or restart Obsidian)
 
-## Configuration
-
-The plugin uses default settings that can be customized. Currently, settings are defined in the code but can be extended with a settings tab in the future.
-
-### Default Settings
-
-- **Minimum Expanded Height**: `600px` - The minimum height a container will expand to
-- **Maximum Expanded Height**: `80%` of viewport height - The maximum height, respecting screen boundaries
-- **Transition Duration**: `300ms` - Animation speed for expansion/contraction
 
 ### Customizing Settings
 
-To customize these values, edit `main.ts` and modify the `DEFAULT_SETTINGS` object:
-
-```typescript
-const DEFAULT_SETTINGS: SidebarExpandSettings = {
-	minExpandedHeight: 600,        // Change this value
-	maxExpandedHeight: 80,         // Percentage of viewport height
-	transitionDuration: 300       // Milliseconds
-}
-```
-
-Then rebuild the plugin with `npm run build`.
-
-## Troubleshooting
-
-- **Plugin not working?**
-  - Make sure the plugin is enabled in Community Plugins
-  - Check the console for errors (Ctrl+Shift+I or Cmd+Option+I)
-  - Try reloading the plugin or restarting Obsidian
-  - Ensure you have the latest version of Obsidian (v0.15.0+)
-
-- **Expansion not happening?**
-  - Make sure you're hovering over the actual container area, not just the header
-  - Check that the container is in a sidebar (left or right)
-  - Try hovering over different containers (File Explorer, Outline, etc.)
-
-- **Resize handles not moving?**
-  - The plugin attempts to update resize handle positions automatically
-  - If handles don't move, try hovering again or reloading the plugin
-  - This is a known limitation and may require Obsidian API updates
-
-- **Expansion too large/small?**
-  - Adjust the settings in `main.ts` (see Configuration section)
-  - Rebuild the plugin after making changes
+transition duration: 300ms default
+expansion percentage: 40% default
 
 ## Compatibility
 
