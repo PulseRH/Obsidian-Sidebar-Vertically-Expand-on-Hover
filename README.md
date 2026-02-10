@@ -1,4 +1,4 @@
-# Obsidian Sidebar Expand on Hover (Plugin)
+# Obsidian Sidebar Vertically Expand on Hover (Plugin)
 
 An Obsidian plugin that expands individual sidebar workspace tab containers (like File Explorer, Outline, etc.) vertically when you hover your mouse over each specific container. The resize handles automatically move to accommodate the expansion.
 
