@@ -2,7 +2,7 @@
 
 An Obsidian plugin that expands individual sidebar workspace tab containers (like File Explorer, Outline, etc.) vertically when you hover your mouse over each specific container. The resize handles automatically move to accommodate the expansion.
 
-![vertical expand on hover low](https://github.com/user-attachments/assets/2c3a3dab-7da1-4921-bd99-d7df45b75f74)
+![https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExNmwzaTh3eXVtOHk5YWQwNHFmYWFxeHg3M2d3MmM0YWhmY3Q1bjZkcyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/tXEd5QMz5zqtBc1Boh/giphy.gif]
 
 
 ## Installation
