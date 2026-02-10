@@ -70,14 +70,6 @@ expansion percentage: 40% default
 - Supports both left and right sidebars
 - Works with all sidebar pane types (File Explorer, Outline, etc.)
 
-## How It Works
-
-1. The plugin detects when you hover over a workspace leaf container in the sidebars
-2. It expands the container vertically to a configurable height
-3. Resize handles are automatically repositioned to accommodate the expansion
-4. When you move your mouse away, the container returns to its original size
-5. Only the container you're hovering over expands, not all containers
-
 ## Technical Details
 
 - Uses Obsidian's Workspace API to detect and manipulate leaves
@@ -87,11 +79,6 @@ expansion percentage: 40% default
 
 ## Known Limitations
 
-- Resize handle movement depends on Obsidian's internal layout system
-- Some edge cases with dynamically added/removed leaves may require plugin reload
-- Maximum expansion is constrained by viewport height to prevent overflow
+- Evenly spaces all panes when unhovered curently doesnt retain custom sizing
 
-## License
-
-Free to use and modify as needed.
 
