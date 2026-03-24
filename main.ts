@@ -199,30 +199,67 @@ export default class SidebarExpandPlugin extends Plugin {
 				const leaves = container.querySelectorAll('.workspace-leaf, .nn-navigation-pane, .nn-list-pane');
 				leaves.forEach((leaf: HTMLElement) => {
 					if (this.isExcludedElement(leaf)) return;
-					
+
 					// Use a unique ID for this plugin instance to prevent conflicts
 					const instanceId = this.manifest.id;
 					if (leaf.dataset.hoverListenerAdded === instanceId) return;
 					leaf.dataset.hoverListenerAdded = instanceId;
-					
-					let unhoverTimeout: number | null = null;
-					
+
 					leaf.addEventListener('mouseenter', () => {
+						if (!this.isPluginActive) return;
+						this.onLeafHover(leaf);
+					});
+				});
+
+				// Attach unhover to .workspace-tabs parents so that moving from leaf
+				// to tab-header-container (still inside .workspace-tabs) does NOT unhover.
+				const tabGroups = container.querySelectorAll('.workspace-tabs');
+				tabGroups.forEach((tabGroup: HTMLElement) => {
+					const instanceId = this.manifest.id;
+					if (tabGroup.dataset.hoverListenerAdded === instanceId) return;
+					tabGroup.dataset.hoverListenerAdded = instanceId;
+
+					let unhoverTimeout: number | null = null;
+
+					tabGroup.addEventListener('mouseenter', () => {
 						if (!this.isPluginActive) return;
 						if (unhoverTimeout) {
 							window.clearTimeout(unhoverTimeout);
 							unhoverTimeout = null;
 						}
-						this.onLeafHover(leaf);
 					});
-					
-					leaf.addEventListener('mouseleave', () => {
+
+					tabGroup.addEventListener('mouseleave', () => {
 						if (!this.isPluginActive) return;
+						if (!this.activeHoveredLeaf) return;
+						// Only unhover if the active leaf belongs to this tab group
+						if (!tabGroup.contains(this.activeHoveredLeaf)) return;
+						const leafToUnhover = this.activeHoveredLeaf;
 						unhoverTimeout = window.setTimeout(() => {
 							if (!this.isPluginActive) return;
-							this.onLeafUnhover(leaf);
+							this.onLeafUnhover(leafToUnhover);
 							unhoverTimeout = null;
-						}, 50); 
+						}, 50);
+					});
+				});
+
+				// Also handle NN panes which may not be inside .workspace-tabs
+				const nnPaneEls = container.querySelectorAll('.nn-navigation-pane, .nn-list-pane');
+				nnPaneEls.forEach((pane: HTMLElement) => {
+					// Skip if already handled above (inside workspace-tabs)
+					if (pane.closest('.workspace-tabs')) return;
+					const instanceId = this.manifest.id;
+					const key = instanceId + '-unhover';
+					if ((pane as any).dataset.hoverUnhoverAdded === key) return;
+					(pane as any).dataset.hoverUnhoverAdded = key;
+
+					pane.addEventListener('mouseleave', () => {
+						if (!this.isPluginActive) return;
+						if (this.activeHoveredLeaf !== pane) return;
+						window.setTimeout(() => {
+							if (!this.isPluginActive) return;
+							this.onLeafUnhover(pane);
+						}, 50);
 					});
 				});
 			}
@@ -396,16 +433,16 @@ export default class SidebarExpandPlugin extends Plugin {
 	private onLeafUnhover(leafEl: HTMLElement) {
 		if (!this.isPluginActive) return;
 		if (this.activeHoveredLeaf !== leafEl) return;
-		
+
 		const activePane = this.getPaneFromLeaf(leafEl);
 		const parentSplit = activePane?.parentElement;
-		
+
 		if (parentSplit) {
 			setTimeout(() => {
 				if (!this.isPluginActive) return;
-				
+
 				const isStillInSplit = this.activeHoveredLeaf !== null && parentSplit.contains(this.activeHoveredLeaf);
-				
+
 				if (isStillInSplit && this.activeHoveredLeaf !== leafEl) {
 					// Mouse moved to another pane in the same sidebar - don't reset
 					return;
