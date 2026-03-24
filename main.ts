@@ -1,12 +1,10 @@
 import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
 
 interface SidebarExpandSettings {
-	expandPercentage: number;
 	transitionDuration: number;
 }
 
 const DEFAULT_SETTINGS: SidebarExpandSettings = {
-	expandPercentage: 40,
 	transitionDuration: 300
 }
 
@@ -349,10 +347,10 @@ export default class SidebarExpandPlugin extends Plugin {
 		}
 		
 		const otherCount = panes.length - 1;
-		const targetRatio = this.settings.expandPercentage / 100;
-		// Calculate flex to achieve targetRatio of total height for active pane
-		// Formula: activeFlex / (activeFlex + otherCount) = targetRatio
-		// Solving: activeFlex = (targetRatio * otherCount) / (1 - targetRatio)
+		// Determine expand percentage based on pane count: 2 panes = 66%, 3+ panes = 42%
+		const paneCount = panes.length;
+		const targetPercent = paneCount <= 2 ? 66 : 42;
+		const targetRatio = targetPercent / 100;
 		const activeFlex = otherCount > 0 ? (targetRatio * otherCount) / (1 - targetRatio) : 1;
 
 		// Find the actual pane in the panes array that matches activePane
@@ -398,15 +396,9 @@ export default class SidebarExpandPlugin extends Plugin {
 			const isNNPane = pane.classList.contains('nn-navigation-pane') || pane.classList.contains('nn-list-pane');
 			
 			if (isActivePane) {
-				// For Notebook Navigator panes, use 65% expansion; for others, use settings
-				const targetExpansion = isNNPane ? 0.65 : targetRatio;
-				const calculatedFlex = isNNPane && otherCount === 1 
-					? (targetExpansion * otherCount) / (1 - targetExpansion)  // For 2 panes: (0.65 * 1) / (1 - 0.65) = 0.65 / 0.35 = 1.857
-					: activeFlex;
-				
 				pane.classList.add('sidebar-expand-hovered');
 				pane.classList.remove('sidebar-expand-shrunk');
-				pane.style.setProperty('flex-grow', `${calculatedFlex}`, 'important');
+				pane.style.setProperty('flex-grow', `${activeFlex}`, 'important');
 				pane.style.setProperty('flex-shrink', '1', 'important');
 				pane.style.setProperty('flex-basis', isNNPane ? '0' : 'auto', 'important'); // Use 0 for NN panes to override fixed pixel values
 				pane.style.setProperty('min-height', '0', 'important');
@@ -517,11 +509,6 @@ export default class SidebarExpandPlugin extends Plugin {
 
 	async loadSettings() {
 		const saved = await this.loadData();
-		// If saved settings have old expandPercentage (< 30), update to new default (40)
-		if (saved && saved.expandPercentage && saved.expandPercentage < 30) {
-			saved.expandPercentage = 40;
-			await this.saveData(saved);
-		}
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
 	}
 
@@ -542,18 +529,6 @@ class SidebarExpandSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.createEl('h2', { text: 'Sidebar Vertically Expand on Hover Settings' });
-
-		new Setting(containerEl)
-			.setName('Expand Percentage')
-			.setDesc('Target size for hovered pane (default: 40%).')
-			.addSlider(slider => slider
-				.setLimits(10, 90, 5)
-				.setValue(this.plugin.settings.expandPercentage)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					this.plugin.settings.expandPercentage = value;
-					await this.plugin.saveSettings();
-				}));
 
 		new Setting(containerEl)
 			.setName('Transition Duration')
