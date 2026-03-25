@@ -1,10 +1,12 @@
 import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
 
 interface SidebarExpandSettings {
+	expansionAmount: number; // total expansion in vh
 	transitionDuration: number;
 }
 
 const DEFAULT_SETTINGS: SidebarExpandSettings = {
+	expansionAmount: 18,
 	transitionDuration: 300
 }
 
@@ -17,6 +19,8 @@ export default class SidebarExpandPlugin extends Plugin {
 	private lastSetupTime: number = 0;
 	private lastHoverTimestamp: number = 0;
 	private isPluginActive: boolean = true;
+	private isResizing: boolean = false;
+	private resizeMouseUpHandler: (() => void) | null = null;
 
 	async onload() {
 		this.isPluginActive = true;
@@ -28,8 +32,7 @@ export default class SidebarExpandPlugin extends Plugin {
 				if (!this.isPluginActive) return;
 				try {
 					document.documentElement.style.setProperty('--sidebar-expand-transition-duration', `${this.settings.transitionDuration}ms`);
-					
-					// Only lock elements in sidebars
+
 					const workspace = this.app.workspace as any;
 					const splits = [workspace.leftSplit, workspace.rightSplit];
 					splits.forEach(split => {
@@ -37,7 +40,7 @@ export default class SidebarExpandPlugin extends Plugin {
 							this.lockVaultProfileElements(split.containerEl);
 						}
 					});
-					
+
 					this.setupHoverListeners();
 					this.startObserving();
 				} catch (error) {
@@ -46,10 +49,10 @@ export default class SidebarExpandPlugin extends Plugin {
 			};
 
 			const workspace = this.app.workspace as any;
-			const isLayoutReady = workspace.layoutReady === true || 
+			const isLayoutReady = workspace.layoutReady === true ||
 				(workspace.leftSplit && (workspace.leftSplit as any).containerEl) ||
 				(workspace.rightSplit && (workspace.rightSplit as any).containerEl);
-			
+
 			if (isLayoutReady) {
 				setTimeout(initializePlugin, 100);
 			} else {
@@ -71,7 +74,7 @@ export default class SidebarExpandPlugin extends Plugin {
 
 	private lockVaultProfileElements(root: HTMLElement | Document = document) {
 		if (!this.isPluginActive) return;
-		
+
 		const vaultProfileClasses = [
 			'workspace-sidedock-vault-profile',
 			'workspace-drawer-vault-profile',
@@ -79,7 +82,7 @@ export default class SidebarExpandPlugin extends Plugin {
 			'workspace-sidebar-header',
 			'workspace-drawer-header'
 		];
-		
+
 		vaultProfileClasses.forEach(cls => {
 			const elements = root.querySelectorAll(`.${cls}`);
 			elements.forEach((el: HTMLElement) => {
@@ -99,7 +102,7 @@ export default class SidebarExpandPlugin extends Plugin {
 
 	onunload() {
 		this.isPluginActive = false;
-		const modifiedElements = document.querySelectorAll('.sidebar-expand-hovered, [data-hover-listener-added="true"], .sidebar-expand-shrunk, .sidebar-expand-split-parent');
+		const modifiedElements = document.querySelectorAll('.sidebar-expand-hovered, [data-hover-listener-added], .sidebar-expand-shrunk, .sidebar-expand-split-parent');
 		modifiedElements.forEach((el) => {
 			const htmlEl = el as HTMLElement;
 			htmlEl.style.removeProperty('flex');
@@ -131,14 +134,14 @@ export default class SidebarExpandPlugin extends Plugin {
 			'workspace-sidebar-header',
 			'workspace-drawer-header'
 		];
-		
-		const isVaultProfile = vaultProfileClasses.some(cls => 
+
+		const isVaultProfile = vaultProfileClasses.some(cls =>
 			element.classList.contains(cls) || element.querySelector(`.${cls}`) !== null
 		);
-		
+
 		const hasSettingsIcon = element.querySelector('[aria-label*="settings" i], [aria-label*="Settings"]') !== null;
 		const hasHelpIcon = element.querySelector('[aria-label*="help" i], [aria-label*="Help"]') !== null;
-		
+
 		return isVaultProfile || (hasSettingsIcon && hasHelpIcon);
 	}
 
@@ -175,41 +178,43 @@ export default class SidebarExpandPlugin extends Plugin {
 		[workspace.leftSplit, workspace.rightSplit].forEach(split => {
 			const container = split?.containerEl || document.querySelector(`.workspace-split.mod-${split?.side}-split`);
 			if (container) {
-				// First, store original flex values for Notebook Navigator panes BEFORE adding listeners
-				// Also force them to 50/50 if they're not already
-				const nnPanes = container.querySelectorAll('.nn-navigation-pane, .nn-list-pane');
-				nnPanes.forEach((pane: HTMLElement) => {
-					if (!(pane as any)._originalFlexGrow) {
-						const computedStyle = window.getComputedStyle(pane);
-						(pane as any)._originalFlexGrow = computedStyle.flexGrow || '1';
-						(pane as any)._originalFlexShrink = computedStyle.flexShrink || '1';
-						(pane as any)._originalFlexBasis = computedStyle.flexBasis || 'auto';
-					}
-					// Force 50/50 split for Notebook Navigator panes on initialization
-					// Only if not currently being hovered (no sidebar-expand classes)
-					if (!pane.classList.contains('sidebar-expand-hovered') && !pane.classList.contains('sidebar-expand-shrunk')) {
-						pane.style.setProperty('flex-grow', '1', 'important');
-						pane.style.setProperty('flex-shrink', '1', 'important');
-						pane.style.setProperty('flex-basis', '0', 'important');
-					}
+				// Detect resize handles — disable hover while dragging
+				const resizeHandles = container.querySelectorAll('.workspace-leaf-resize-handle');
+				resizeHandles.forEach((handle: HTMLElement) => {
+					const instanceId = this.manifest.id;
+					if (handle.dataset.hoverListenerAdded === instanceId) return;
+					handle.dataset.hoverListenerAdded = instanceId;
+
+					handle.addEventListener('mousedown', () => {
+						this.isResizing = true;
+						// Clear any active hover state so resize starts from clean layout
+						if (this.activeHoveredLeaf) {
+							this.onLeafUnhover(this.activeHoveredLeaf);
+						}
+						const onMouseUp = () => {
+							// Delay re-enabling hover so the mouseup doesn't immediately trigger hover
+							setTimeout(() => { this.isResizing = false; }, 200);
+							document.removeEventListener('mouseup', onMouseUp);
+						};
+						document.addEventListener('mouseup', onMouseUp);
+					});
 				});
-				
+
 				const leaves = container.querySelectorAll('.workspace-leaf, .nn-navigation-pane, .nn-list-pane');
 				leaves.forEach((leaf: HTMLElement) => {
 					if (this.isExcludedElement(leaf)) return;
 
-					// Use a unique ID for this plugin instance to prevent conflicts
 					const instanceId = this.manifest.id;
 					if (leaf.dataset.hoverListenerAdded === instanceId) return;
 					leaf.dataset.hoverListenerAdded = instanceId;
 
 					leaf.addEventListener('mouseenter', () => {
-						if (!this.isPluginActive) return;
+						if (!this.isPluginActive || this.isResizing) return;
 						this.onLeafHover(leaf);
 					});
 				});
 
-				// Attach unhover to .workspace-tabs parents so that moving from leaf
+				// Attach unhover to .workspace-tabs parents so moving from leaf
 				// to tab-header-container (still inside .workspace-tabs) does NOT unhover.
 				const tabGroups = container.querySelectorAll('.workspace-tabs');
 				tabGroups.forEach((tabGroup: HTMLElement) => {
@@ -230,7 +235,6 @@ export default class SidebarExpandPlugin extends Plugin {
 					tabGroup.addEventListener('mouseleave', () => {
 						if (!this.isPluginActive) return;
 						if (!this.activeHoveredLeaf) return;
-						// Only unhover if the active leaf belongs to this tab group
 						if (!tabGroup.contains(this.activeHoveredLeaf)) return;
 						const leafToUnhover = this.activeHoveredLeaf;
 						unhoverTimeout = window.setTimeout(() => {
@@ -241,10 +245,9 @@ export default class SidebarExpandPlugin extends Plugin {
 					});
 				});
 
-				// Also handle NN panes which may not be inside .workspace-tabs
+				// Handle NN panes not inside .workspace-tabs
 				const nnPaneEls = container.querySelectorAll('.nn-navigation-pane, .nn-list-pane');
 				nnPaneEls.forEach((pane: HTMLElement) => {
-					// Skip if already handled above (inside workspace-tabs)
 					if (pane.closest('.workspace-tabs')) return;
 					const instanceId = this.manifest.id;
 					const key = instanceId + '-unhover';
@@ -264,159 +267,181 @@ export default class SidebarExpandPlugin extends Plugin {
 		});
 	}
 
+	private getFilteredPanes(parentSplit: HTMLElement): HTMLElement[] {
+		return Array.from(parentSplit.children).filter(el => {
+			const htmlEl = el as HTMLElement;
+			if (this.isExcludedElement(htmlEl)) return false;
+			if (el.classList.contains('workspace-leaf-resize-handle') ||
+				el.classList.contains('nn-resizer-handle') ||
+				el.classList.contains('nn-resize-handle')) return false;
+			if (!el.className || el.className.trim() === '') return false;
+			if (htmlEl.offsetHeight === 0 && htmlEl.offsetWidth === 0) return false;
+			return true;
+		}) as HTMLElement[];
+	}
+
+	private findActivePane(activePane: HTMLElement, panes: HTMLElement[]): HTMLElement | null {
+		if (panes.indexOf(activePane) >= 0) return activePane;
+
+		const isNavPane = activePane.classList.contains('nn-navigation-pane');
+		const isListPane = activePane.classList.contains('nn-list-pane');
+
+		if (isNavPane || isListPane) {
+			return panes.find(p => {
+				if (isNavPane) return p.classList.contains('nn-navigation-pane');
+				if (isListPane) return p.classList.contains('nn-list-pane');
+				return false;
+			}) || null;
+		}
+
+		let current: HTMLElement | null = activePane;
+		while (current) {
+			if (panes.indexOf(current) >= 0) return current;
+			current = current.parentElement;
+		}
+		return null;
+	}
+
 	private onLeafHover(leafEl: HTMLElement) {
 		if (!this.isPluginActive) return;
-		
+
 		const activePane = this.getPaneFromLeaf(leafEl);
 		const parentSplit = activePane?.parentElement;
-		
-		// Check if this is an NN pane early, before throttle check
 		const isNNPane = activePane && (activePane.classList.contains('nn-navigation-pane') || activePane.classList.contains('nn-list-pane'));
-		
+
 		if (!activePane || !parentSplit) return;
 
-		// Prevent rapid toggling and flickering
-		if (this.activeHoveredLeaf === leafEl) {
-			return;
-		}
-		
-		// Check if we're switching between DIFFERENT panes in the same container
+		if (this.activeHoveredLeaf === leafEl) return;
+
+		// Throttle / anti-flicker
 		const now = Date.now();
-		let isSwitchingToDifferentPane = false;
 		if (this.activeHoveredLeaf) {
 			const oldActivePane = this.getPaneFromLeaf(this.activeHoveredLeaf);
 			if (oldActivePane?.parentElement === parentSplit) {
-				// Same container - check if different panes
 				if (oldActivePane !== activePane) {
-					// Switching to a different pane in the same container
-					// Check if we just switched recently to prevent rapid toggling
-					const timeSinceLastSwitch = now - this.lastHoverTimestamp;
-					// For NN panes, use shorter cooldown (150ms) for better responsiveness
 					const switchCooldown = isNNPane ? 150 : 300;
-					if (timeSinceLastSwitch < switchCooldown) {
-						// Too soon after last switch - ignore to prevent rapid toggling
-						return;
-					}
-					// Allow the switch
-					isSwitchingToDifferentPane = true;
+					if (now - this.lastHoverTimestamp < switchCooldown) return;
 				} else {
-					// Same pane - ignore to prevent re-processing
 					return;
 				}
 			}
 		}
-		// For NN panes, use shorter throttle (50ms) for better responsiveness; others use 150ms
-		// But don't throttle if we're switching to a different parent container (different sidebar)
 		const throttleDelay = isNNPane ? 50 : 150;
 		const isDifferentParent = this.activeHoveredLeaf && this.getPaneFromLeaf(this.activeHoveredLeaf)?.parentElement !== parentSplit;
-		if (now - this.lastHoverTimestamp < throttleDelay && !isSwitchingToDifferentPane && !isDifferentParent) {
-			return;
-		}
+		if (now - this.lastHoverTimestamp < throttleDelay && !isDifferentParent) return;
 		this.lastHoverTimestamp = now;
 
 		this.activeHoveredLeaf = leafEl;
 
 		parentSplit.classList.add('sidebar-expand-split-parent');
-		parentSplit.style.setProperty('display', 'flex', 'important');
-		parentSplit.style.setProperty('flex-direction', 'column', 'important');
 
-		const panes = Array.from(parentSplit.children).filter(el => {
-			const htmlEl = el as HTMLElement;
-			// Exclude vault profile and other excluded elements
-			if (this.isExcludedElement(htmlEl)) return false;
-			// Exclude resize handles
-			if (el.classList.contains('workspace-leaf-resize-handle') || 
-			    el.classList.contains('nn-resizer-handle') ||
-			    el.classList.contains('nn-resize-handle')) return false;
-			// Exclude empty elements (no meaningful classes or content)
-			if (!el.className || el.className.trim() === '') return false;
-			// Exclude elements with no visible content
-			if (htmlEl.offsetHeight === 0 && htmlEl.offsetWidth === 0) {
-				return false;
-			}
-			return true;
-		}) as HTMLElement[];
-		
-		// Skip if only one pane (nothing to expand/shrink)
+		const panes = this.getFilteredPanes(parentSplit);
 		if (panes.length <= 1) {
-			// Clean up any existing classes/styles if we're skipping
 			parentSplit.classList.remove('sidebar-expand-split-parent');
-			parentSplit.style.removeProperty('display');
-			parentSplit.style.removeProperty('flex-direction');
 			return;
 		}
-		
-		const otherCount = panes.length - 1;
-		// Determine expand percentage based on pane count: 2 panes = 66%, 3+ panes = 42%
-		const paneCount = panes.length;
-		const targetPercent = paneCount <= 2 ? 66 : 42;
-		const targetRatio = targetPercent / 100;
-		const activeFlex = otherCount > 0 ? (targetRatio * otherCount) / (1 - targetRatio) : 1;
 
-		// Find the actual pane in the panes array that matches activePane
-		// For Notebook Navigator, activePane IS the pane itself, so we should find it directly
-		let actualActivePane: HTMLElement | null = null;
-		
-		// First, try direct match
-		if (panes.indexOf(activePane) >= 0) {
-			actualActivePane = activePane;
-		} else {
-			// For Notebook Navigator panes, they should be direct children, so try class matching
-			const isNavPane = activePane.classList.contains('nn-navigation-pane');
-			const isListPane = activePane.classList.contains('nn-list-pane');
-			
-			if (isNavPane || isListPane) {
-				// Find the pane with the matching class
-				actualActivePane = panes.find(p => {
-					if (isNavPane) return p.classList.contains('nn-navigation-pane');
-					if (isListPane) return p.classList.contains('nn-list-pane');
-					return false;
-				}) || null;
-			} else {
-				// For workspace leaves, try to find by traversing up
-				let current: HTMLElement | null = activePane;
-				while (current && !actualActivePane) {
-					if (panes.indexOf(current) >= 0) {
-						actualActivePane = current;
-						break;
-					}
-					current = current.parentElement;
+		const actualActivePane = this.findActivePane(activePane, panes);
+		if (!actualActivePane) return;
+
+		const activeIndex = panes.indexOf(actualActivePane);
+
+		// Check if the parent is an NN split container
+		const isNNSplit = parentSplit.classList.contains('nn-split-container');
+
+		if (isNNSplit) {
+			// NN panes: use old percentage-based approach (66% for 2 panes, 42% for 3+)
+			parentSplit.style.setProperty('display', 'flex', 'important');
+			parentSplit.style.setProperty('flex-direction', 'column', 'important');
+
+			const otherCount = panes.length - 1;
+			const targetPercent = panes.length <= 2 ? 66 : 42;
+			const targetRatio = targetPercent / 100;
+			const activeFlex = otherCount > 0 ? (targetRatio * otherCount) / (1 - targetRatio) : 1;
+
+			panes.forEach(pane => {
+				const isPaneNN = pane.classList.contains('nn-navigation-pane') || pane.classList.contains('nn-list-pane');
+				pane.style.setProperty('transition', `flex ${this.settings.transitionDuration}ms ease, min-height ${this.settings.transitionDuration}ms ease`, 'important');
+
+				if (pane === actualActivePane) {
+					pane.classList.add('sidebar-expand-hovered');
+					pane.classList.remove('sidebar-expand-shrunk');
+					pane.style.setProperty('flex-grow', `${activeFlex}`, 'important');
+					pane.style.setProperty('flex-shrink', '1', 'important');
+					pane.style.setProperty('flex-basis', isPaneNN ? '0' : 'auto', 'important');
+					pane.style.setProperty('min-height', '0', 'important');
+				} else {
+					pane.classList.add('sidebar-expand-shrunk');
+					pane.classList.remove('sidebar-expand-hovered');
+					const height = (pane as any)._originalHeight || pane.offsetHeight;
+					if (!(pane as any)._originalHeight && height > 0) (pane as any)._originalHeight = height;
+					const minH = height > 0 ? Math.max(height * 0.2, 60) : 60;
+					pane.style.setProperty('flex-grow', '1', 'important');
+					pane.style.setProperty('flex-shrink', '1', 'important');
+					pane.style.setProperty('flex-basis', isPaneNN ? '0' : 'auto', 'important');
+					pane.style.setProperty('min-height', `${minH}px`, 'important');
 				}
-			}
-		}
-		
-		if (!actualActivePane) {
-			return;
-		}
-		
-		panes.forEach((pane, index) => {
-			pane.style.setProperty('transition', `flex ${this.settings.transitionDuration}ms ease, min-height ${this.settings.transitionDuration}ms ease`, 'important');
-			
-			const isActivePane = pane === actualActivePane;
-			const isNNPane = pane.classList.contains('nn-navigation-pane') || pane.classList.contains('nn-list-pane');
-			
-			if (isActivePane) {
-				pane.classList.add('sidebar-expand-hovered');
-				pane.classList.remove('sidebar-expand-shrunk');
-				pane.style.setProperty('flex-grow', `${activeFlex}`, 'important');
+			});
+		} else {
+			// Regular sidebar panes: expand by fixed amount, preserving custom sizes
+			panes.forEach(pane => {
+				if (!(pane as any)._originalHeight) {
+					const h = pane.offsetHeight;
+					if (h > 0) (pane as any)._originalHeight = h;
+					const s = pane.style;
+					(pane as any)._origFlex = s.flex || '';
+					(pane as any)._origFlexGrow = s.flexGrow || '';
+					(pane as any)._origFlexShrink = s.flexShrink || '';
+					(pane as any)._origFlexBasis = s.flexBasis || '';
+					(pane as any)._origHeight = s.height || '';
+					(pane as any)._origMinHeight = s.minHeight || '';
+					(pane as any)._origMaxHeight = s.maxHeight || '';
+				}
+			});
+
+			const totalOriginalH = panes.reduce((sum, p) => sum + ((p as any)._originalHeight || p.offsetHeight), 0);
+			const expansionFraction = this.settings.expansionAmount / 100;
+			const expansionPx = expansionFraction * totalOriginalH;
+			const halfExpansion = expansionPx / 2;
+
+			const panesAbove = panes.slice(0, activeIndex);
+			const panesBelow = panes.slice(activeIndex + 1);
+
+			let shrinkAbove = halfExpansion;
+			let shrinkBelow = halfExpansion;
+			if (panesAbove.length === 0) { shrinkBelow = expansionPx; shrinkAbove = 0; }
+			else if (panesBelow.length === 0) { shrinkAbove = expansionPx; shrinkBelow = 0; }
+
+			const perPaneAbove = panesAbove.length > 0 ? shrinkAbove / panesAbove.length : 0;
+			const perPaneBelow = panesBelow.length > 0 ? shrinkBelow / panesBelow.length : 0;
+
+			const targetHeights: number[] = panes.map((pane, index) => {
+				const originalH = (pane as any)._originalHeight || pane.offsetHeight;
+				if (pane === actualActivePane) {
+					return originalH + expansionPx;
+				} else {
+					const shrink = index < activeIndex ? perPaneAbove : perPaneBelow;
+					return Math.max(originalH - shrink, 40);
+				}
+			});
+
+			const transitionValue = `flex-grow ${this.settings.transitionDuration}ms ease, flex-basis ${this.settings.transitionDuration}ms ease`;
+
+			panes.forEach((pane, index) => {
+				pane.style.setProperty('transition', transitionValue, 'important');
+				pane.style.setProperty('flex-grow', `${targetHeights[index]}`, 'important');
 				pane.style.setProperty('flex-shrink', '1', 'important');
-				pane.style.setProperty('flex-basis', isNNPane ? '0' : 'auto', 'important'); // Use 0 for NN panes to override fixed pixel values
-				pane.style.setProperty('min-height', '0', 'important');
-			} else {
-				pane.classList.add('sidebar-expand-shrunk');
-				pane.classList.remove('sidebar-expand-hovered');
-				
-				const height = (pane as any)._originalHeight || pane.offsetHeight;
-				if (!(pane as any)._originalHeight && height > 0) (pane as any)._originalHeight = height;
-				
-				const minH = height > 0 ? Math.max(height * 0.2, 60) : 60;
-				
-				pane.style.setProperty('flex-grow', '1', 'important');
-				pane.style.setProperty('flex-shrink', '1', 'important');
-				pane.style.setProperty('flex-basis', isNNPane ? '0' : 'auto', 'important'); // Use 0 for NN panes to override fixed pixel values
-				pane.style.setProperty('min-height', `${minH}px`, 'important');
-			}
-		});
+				pane.style.setProperty('flex-basis', '0px', 'important');
+
+				if (pane === actualActivePane) {
+					pane.classList.add('sidebar-expand-hovered');
+					pane.classList.remove('sidebar-expand-shrunk');
+				} else {
+					pane.classList.add('sidebar-expand-shrunk');
+					pane.classList.remove('sidebar-expand-hovered');
+				}
+			});
+		}
 
 		this.lockVaultProfileElements(parentSplit);
 		this.updateLayout();
@@ -434,39 +459,60 @@ export default class SidebarExpandPlugin extends Plugin {
 				if (!this.isPluginActive) return;
 
 				const isStillInSplit = this.activeHoveredLeaf !== null && parentSplit.contains(this.activeHoveredLeaf);
+				if (isStillInSplit && this.activeHoveredLeaf !== leafEl) return;
 
-				if (isStillInSplit && this.activeHoveredLeaf !== leafEl) {
-					// Mouse moved to another pane in the same sidebar - don't reset
-					return;
-				}
-
-				// If we are here, either the mouse left the sidebar OR it stayed on the same leaf (which shouldn't happen on mouseleave)
 				this.activeHoveredLeaf = null;
 				parentSplit.classList.remove('sidebar-expand-split-parent');
+				const isNNSplit = parentSplit.classList.contains('nn-split-container');
+				if (!isNNSplit) {
+					parentSplit.style.removeProperty('display');
+					parentSplit.style.removeProperty('flex-direction');
+				}
 				const children = Array.from(parentSplit.children) as HTMLElement[];
 				children.forEach(el => {
-					if (this.isExcludedElement(el as HTMLElement)) return;
+					if (this.isExcludedElement(el)) return;
 					const htmlEl = el as HTMLElement;
-					const isNNPane = htmlEl.classList.contains('nn-navigation-pane') || htmlEl.classList.contains('nn-list-pane');
-					
 					htmlEl.classList.remove('sidebar-expand-hovered');
 					htmlEl.classList.remove('sidebar-expand-shrunk');
-					
-					// For Notebook Navigator panes, restore to true 50/50 (flex-grow: 1 for both, flex-basis: 0 to override fixed pixel values)
-					if (isNNPane) {
-						htmlEl.style.setProperty('flex-grow', '1', 'important');
-						htmlEl.style.setProperty('flex-shrink', '1', 'important');
-						htmlEl.style.setProperty('flex-basis', '0', 'important'); // Use 0 instead of auto to override fixed pixel values from Notebook Navigator
-						htmlEl.style.removeProperty('min-height');
+
+					if (isNNSplit) {
+						// NN panes: reset to equal 50/50 split
+						const isPaneNN = htmlEl.classList.contains('nn-navigation-pane') || htmlEl.classList.contains('nn-list-pane');
+						if (isPaneNN) {
+							htmlEl.style.setProperty('flex-grow', '1', 'important');
+							htmlEl.style.setProperty('flex-shrink', '1', 'important');
+							htmlEl.style.setProperty('flex-basis', '0', 'important');
+							htmlEl.style.removeProperty('min-height');
+						}
+						htmlEl.style.removeProperty('transition');
+						delete (htmlEl as any)._originalHeight;
 					} else {
-						// For other panes, remove all flex properties
-						htmlEl.style.removeProperty('flex');
-						htmlEl.style.removeProperty('flex-grow');
-						htmlEl.style.removeProperty('flex-shrink');
-						htmlEl.style.removeProperty('flex-basis');
-						htmlEl.style.removeProperty('min-height');
+						// Regular panes: restore Obsidian's original flex values
+						const restoreOrRemove = (prop: string, saved: string) => {
+							if (saved) {
+								htmlEl.style.setProperty(prop, saved);
+							} else {
+								htmlEl.style.removeProperty(prop);
+							}
+						};
+						restoreOrRemove('flex', (htmlEl as any)._origFlex);
+						restoreOrRemove('flex-grow', (htmlEl as any)._origFlexGrow);
+						restoreOrRemove('flex-shrink', (htmlEl as any)._origFlexShrink);
+						restoreOrRemove('flex-basis', (htmlEl as any)._origFlexBasis);
+						restoreOrRemove('height', (htmlEl as any)._origHeight);
+						restoreOrRemove('min-height', (htmlEl as any)._origMinHeight);
+						restoreOrRemove('max-height', (htmlEl as any)._origMaxHeight);
+						htmlEl.style.removeProperty('transition');
+
+						delete (htmlEl as any)._originalHeight;
+						delete (htmlEl as any)._origFlex;
+						delete (htmlEl as any)._origFlexGrow;
+						delete (htmlEl as any)._origFlexShrink;
+						delete (htmlEl as any)._origFlexBasis;
+						delete (htmlEl as any)._origHeight;
+						delete (htmlEl as any)._origMinHeight;
+						delete (htmlEl as any)._origMaxHeight;
 					}
-					delete (htmlEl as any)._originalHeight;
 				});
 				this.updateLayout();
 			}, 30);
@@ -474,21 +520,19 @@ export default class SidebarExpandPlugin extends Plugin {
 	}
 
 	private getPaneFromLeaf(leafEl: HTMLElement): HTMLElement | null {
-		// For Notebook Navigator panes, if the leafEl itself is a pane, return it directly
 		if (leafEl.classList.contains('nn-navigation-pane') || leafEl.classList.contains('nn-list-pane')) {
 			return leafEl;
 		}
-		
+
 		let current: HTMLElement | null = leafEl;
 		let depth = 0;
 		while (current && current.parentElement && depth < 20) {
 			const parent = current.parentElement;
-			// Check if current is a pane
 			if (current.classList.contains('nn-navigation-pane') || current.classList.contains('nn-list-pane')) {
 				return current;
 			}
-			if (parent.classList.contains('workspace-split') || 
-			    parent.classList.contains('nn-split-container')) {
+			if (parent.classList.contains('workspace-split') ||
+				parent.classList.contains('nn-split-container')) {
 				return current;
 			}
 			current = current.parentElement;
@@ -529,6 +573,18 @@ class SidebarExpandSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.createEl('h2', { text: 'Sidebar Vertically Expand on Hover Settings' });
+
+		new Setting(containerEl)
+			.setName('Expansion Amount')
+			.setDesc('Total expansion as % of sidebar height. Half taken from above, half from below. (default: 18)')
+			.addSlider(slider => slider
+				.setLimits(4, 50, 2)
+				.setValue(this.plugin.settings.expansionAmount)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					this.plugin.settings.expansionAmount = value;
+					await this.plugin.saveSettings();
+				}));
 
 		new Setting(containerEl)
 			.setName('Transition Duration')
