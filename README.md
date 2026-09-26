@@ -10,6 +10,16 @@ Expand stacked sidebar panes vertically when you hover over them. Neighbouring p
 
 In the plugin's settings, adjust **Expansion amount** (4–50% of the stacked panes' combined height; default 18%) and **Transition duration** (0–2000 milliseconds; default 300). Expansion is limited by the space available in neighbouring panes. The plugin respects the operating system's reduced-motion preference.
 
+
+### Full-height hover
+
+- **Hold Alt / Option** while hovering to temporarily fill 100% of the sidebar's available content height, ignoring **Expansion amount**. Releasing the key returns to percentage expansion.
+- Run **Toggle full-height hover** from the command palette to switch the mode on or off. Assign your own shortcut under **Settings → Hotkeys**; the plugin does not reserve a default shortcut.
+- The **Full-height hover** settings toggle does the same thing and is saved across restarts.
+- Change **Full-height hold key** to Alt/Option, Control, Shift, Command/Windows, or Disabled.
+
+Full-height mode temporarily hides neighbouring panes and their resize handles, including competing nested groups. Sidebar controls and the vault footer remain available. Move outside the expanded pane to restore the layout before hovering another pane. If the toggle is enabled, releasing the hold key keeps full-height mode enabled.
+
 ## Compatibility
 
 - Desktop Obsidian 1.12.3 or later. Mobile touch layouts are not supported.

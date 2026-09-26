@@ -63,6 +63,7 @@ async function fixture() {
         async loadData() { return null; }
         async saveData(value) { this.saved = value; }
         addSettingTab(tab) { this.tab = tab; }
+        addCommand(command) { this.command = command; }
         register(callback) { this.cleanups.push(callback); }
         registerEvent(event) { this.register(event.off); }
         registerDomEvent(el, name, callback) {
@@ -75,15 +76,16 @@ async function fixture() {
     const module = { exports: {} };
     vm.runInNewContext(readFileSync('main.js', 'utf8'), {
         module, exports: module.exports,
-        require: name => { assert.equal(name, 'obsidian'); return { Plugin, PluginSettingTab, Setting: class {} }; },
+        require: name => { assert.equal(name, 'obsidian'); return { Plugin, PluginSettingTab, Setting: class {}, Notice: class {} }; },
         window, Node: window.Node, Element: window.Element, HTMLElement: window.HTMLElement,
         MutationObserver: window.MutationObserver
     });
     const plugin = new module.exports.default();
     await plugin.onload();
-    const mouse = (el, name, relatedTarget = null) => el.dispatchEvent(new window.MouseEvent(name, { bubbles: true, relatedTarget }));
+    const mouse = (el, name, relatedTarget = null, modifiers = {}) => el.dispatchEvent(new window.MouseEvent(name, { bubbles: true, relatedTarget, ...modifiers }));
+    const key = (name, key, modifiers = {}) => window.document.dispatchEvent(new window.KeyboardEvent(name, { key, bubbles: true, ...modifiers }));
     const flush = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); };
-    return { dom, window, root, panes, plugin, timers, mouse, flush, ready: () => ready(), layout: () => layoutCallback?.() };
+    return { dom, window, root, panes, plugin, timers, mouse, key, flush, ready: () => ready(), layout: () => layoutCallback?.() };
 }
 
 test('hovering headers expands; leaving restores exact inline sizing and priorities', async () => {
@@ -198,4 +200,101 @@ test('release metadata and runtime imports satisfy installation requirements', (
     assert.ok(readFileSync('LICENSE', 'utf8').includes('MIT License'));
     const imports = [...readFileSync('main.js', 'utf8').matchAll(/require\("([^"]+)"\)/g)].map(match => match[1]);
     assert.deepEqual(imports, ['obsidian']);
+});
+
+test('hold key overrides percentage immediately and releasing restores percentage sizing', async () => {
+    const f = await fixture(); f.ready();
+    f.plugin.settings.expansionAmount = 4;
+    f.mouse(f.panes[0], 'mouseover');
+    f.key('keydown', 'Alt', { altKey: true });
+    assert.equal(f.panes[0].classList.contains('sidebar-expand-full-active'), true);
+    assert.equal(f.panes[1].classList.contains('sidebar-expand-full-hidden'), true);
+    assert.equal(f.panes[0].classList.contains('sidebar-expand-managed'), false);
+    assert.equal(f.root.querySelector('.workspace-sidedock-vault-profile').classList.length, 1);
+    f.key('keyup', 'Alt');
+    assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '424');
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('modifier already held before entering a sidebar activates full height', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.panes[1], 'mouseover', null, { altKey: true });
+    assert.equal(f.panes[1].classList.contains('sidebar-expand-full-active'), true);
+    f.mouse(f.panes[1], 'mouseout'); f.flush();
+    assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('toggle command persists full-height mode and has no conflicting default hotkey', async () => {
+    const f = await fixture(); f.ready();
+    assert.equal(f.plugin.command.id, 'toggle-full-height-hover');
+    assert.equal(f.plugin.command.hotkeys, undefined);
+    f.mouse(f.panes[0], 'mouseover');
+    await f.plugin.command.callback();
+    assert.equal(f.plugin.saved.fullHeightEnabled, true);
+    assert.equal(f.panes[0].classList.contains('sidebar-expand-full-active'), true);
+    f.mouse(f.panes[0], 'mouseout'); f.flush();
+    f.mouse(f.panes[1], 'mouseover');
+    assert.equal(f.panes[1].classList.contains('sidebar-expand-full-active'), true);
+    f.key('keydown', 'Alt', { altKey: true }); f.key('keyup', 'Alt');
+    assert.equal(f.panes[1].classList.contains('sidebar-expand-full-active'), true);
+    await f.plugin.command.callback();
+    assert.equal(f.plugin.saved.fullHeightEnabled, false);
+    assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '308');
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('nested full-height panes collapse competing groups all the way to sidebar root', async () => {
+    const f = await fixture(); f.ready();
+    const parent = f.window.document.createElement('div');
+    parent.className = 'workspace-split'; parent.style.flexDirection = 'column';
+    f.panes[0].before(parent); parent.appendChild(f.panes[0]);
+    const other = f.window.document.createElement('div'); other.className = 'workspace-tabs'; parent.appendChild(other);
+    f.mouse(f.panes[0], 'mouseover', null, { altKey: true });
+    assert.ok(f.panes[0].classList.contains('sidebar-expand-full-active'));
+    assert.ok(parent.classList.contains('sidebar-expand-full-active'));
+    assert.ok(other.classList.contains('sidebar-expand-full-hidden'));
+    assert.ok(f.panes[1].classList.contains('sidebar-expand-full-hidden'));
+    f.plugin.unload();
+    assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
+    f.dom.window.close();
+});
+
+test('blur and unload clear full-height mode without leaving a stuck modifier', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.panes[0], 'mouseover', null, { altKey: true });
+    f.window.dispatchEvent(new f.window.Event('blur'));
+    assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
+    f.mouse(f.panes[0], 'mouseover');
+    assert.ok(f.panes[0].classList.contains('sidebar-expand-managed'));
+    f.key('keydown', 'Alt', { altKey: true });
+    f.plugin.unload();
+    f.key('keydown', 'Alt', { altKey: true });
+    assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
+    assert.equal(f.timers.size, 0);
+    f.dom.window.close();
+});
+
+test('changing or disabling the hold modifier clears its previous held state', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.panes[0], 'mouseover', null, { altKey: true });
+    await f.plugin.setHoldKey('Shift');
+    assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
+    f.key('keydown', 'Shift', { shiftKey: true });
+    assert.ok(f.panes[0].classList.contains('sidebar-expand-full-active'));
+    await f.plugin.setHoldKey('None');
+    f.key('keydown', 'Shift', { shiftKey: true });
+    assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('full-height mode restores hidden siblings if the active pane is removed', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.panes[0], 'mouseover', null, { altKey: true });
+    f.panes[0].remove(); await Promise.resolve();
+    assert.equal(f.panes[1].classList.contains('sidebar-expand-full-hidden'), false);
+    assert.equal(f.panes[0].classList.contains('sidebar-expand-full-active'), false);
+    f.plugin.unload(); f.dom.window.close();
 });

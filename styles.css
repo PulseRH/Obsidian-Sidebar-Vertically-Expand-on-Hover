@@ -12,3 +12,16 @@
         transition: none !important;
     }
 }
+
+/* Full-height mode removes competing panes from layout, including their headers. */
+.sidebar-expand-full-active {
+    flex: 1 1 0px !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    height: auto !important;
+    transition: none !important;
+}
+
+.sidebar-expand-full-hidden {
+    display: none !important;
+}

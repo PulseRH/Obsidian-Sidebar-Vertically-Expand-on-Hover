@@ -1,6 +1,8 @@
 export interface SidebarExpandSettings {
     expansionAmount: number;
     transitionDuration: number;
+    fullHeightEnabled: boolean;
+    fullHeightHoldKey: 'Alt' | 'Control' | 'Shift' | 'Meta' | 'None';
 }
 
 export function normalizeSettings(value: unknown): SidebarExpandSettings {
@@ -9,7 +11,10 @@ export function normalizeSettings(value: unknown): SidebarExpandSettings {
         typeof input === 'number' && Number.isFinite(input) ? Math.min(max, Math.max(min, input)) : fallback;
     return {
         expansionAmount: bounded(saved.expansionAmount, 18, 4, 50),
-        transitionDuration: bounded(saved.transitionDuration, 300, 0, 2000)
+        transitionDuration: bounded(saved.transitionDuration, 300, 0, 2000),
+        fullHeightEnabled: saved.fullHeightEnabled === true,
+        fullHeightHoldKey: saved.fullHeightHoldKey === 'Control' || saved.fullHeightHoldKey === 'Shift' ||
+            saved.fullHeightHoldKey === 'Meta' || saved.fullHeightHoldKey === 'None' ? saved.fullHeightHoldKey : 'Alt'
     };
 }
 
