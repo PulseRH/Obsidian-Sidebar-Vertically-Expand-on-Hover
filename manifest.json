@@ -1,18 +1,10 @@
 {
-	"id": "sidebar-expand-on-hover",
-	"name": "Sidebar Vertically Expand on Hover",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Expands individual sidebar workspace tab containers vertically on hover, with resize handles moving to accommodate the expansion.",
-	"author": "Your Name",
-	"authorUrl": "",
-	"fundingUrl": "",
-	"isDesktopOnly": true
+  "id": "sidebar-expand-on-hover",
+  "name": "Sidebar Vertically Expand on Hover",
+  "version": "1.0.1",
+  "minAppVersion": "1.12.3",
+  "description": "Expand stacked sidebar panes vertically on hover while preserving their original sizes.",
+  "author": "PulseRH",
+  "authorUrl": "https://github.com/PulseRH",
+  "isDesktopOnly": true
 }
-
-
-
-
-
-
-
