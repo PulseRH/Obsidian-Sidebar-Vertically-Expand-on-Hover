@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
 import { normalizeSettings, targetHeights, type SidebarExpandSettings } from './src/layout';
 
 const PANE_SELECTOR = '.workspace-tabs, .nn-navigation-pane, .nn-list-pane';
@@ -17,11 +17,22 @@ export default class SidebarExpandPlugin extends Plugin {
     private resizeTimer: number | null = null;
     private resizing = false;
     private disposed = false;
+    private holdKeyDown = false;
+    private fullHeightClasses: { el: HTMLElement; name: string; parent: HTMLElement | null }[] = [];
 
     async onload(): Promise<void> {
         const saved: unknown = await this.loadData();
         this.settings = normalizeSettings(saved);
         this.addSettingTab(new SidebarExpandSettingTab(this));
+        this.addCommand({
+            id: 'toggle-full-height-hover',
+            name: 'Toggle full-height hover',
+            callback: async () => {
+                this.settings.fullHeightEnabled = !this.settings.fullHeightEnabled;
+                await this.saveSettings();
+                new Notice(this.settings.fullHeightEnabled ? 'Full-height hover enabled.' : 'Full-height hover disabled.');
+            }
+        });
         this.app.workspace.onLayoutReady(() => {
             if (this.disposed) return;
             // Sidebar markup has no public pane-sizing API. Keep DOM access scoped
@@ -33,14 +44,25 @@ export default class SidebarExpandPlugin extends Plugin {
     }
 
     private watchSidebar(root: HTMLElement): void {
+        const updateHoldKey = (event: KeyboardEvent): void => {
+            const held = this.settings.fullHeightHoldKey !== 'None' && event.getModifierState(this.settings.fullHeightHoldKey);
+            if (held === this.holdKeyDown) return;
+            this.holdKeyDown = held;
+            this.refreshExpansion();
+        };
+        this.registerDomEvent(root.doc, 'keydown', updateHoldKey);
+        this.registerDomEvent(root.doc, 'keyup', updateHoldKey);
         this.registerDomEvent(root, 'mouseover', (event: MouseEvent) => {
             if (this.disposed || this.resizing) return;
             const target = event.target as Node | null;
             if (!(target?.instanceOf(Element))) return;
             const pane = target.closest<HTMLElement>(PANE_SELECTOR);
             if (!pane || !pane.closest('.mod-left-split, .mod-right-split')) return;
+            const held = this.settings.fullHeightHoldKey !== 'None' && event.getModifierState(this.settings.fullHeightHoldKey);
+            const changed = held !== this.holdKeyDown;
+            this.holdKeyDown = held;
             this.clearLeaveTimer();
-            if (pane !== this.activePane) this.expand(pane);
+            if (pane !== this.activePane || changed) this.expand(pane);
         });
         this.registerDomEvent(root, 'mouseout', (event: MouseEvent) => {
             const pane = this.activePane;
@@ -70,12 +92,14 @@ export default class SidebarExpandPlugin extends Plugin {
             }, 200);
         });
         this.registerDomEvent(root.win, 'blur', () => {
+            this.holdKeyDown = false;
             this.resizing = false;
             this.reset();
         });
         // Delegation covers new tabs; restore when an active pane moves or closes.
         const observer = new MutationObserver(() => {
-            if (this.panes.some(({ el }) => !el.isConnected || el.parentElement !== this.activePane?.parentElement)) {
+            if (this.panes.some(({ el }) => !el.isConnected || el.parentElement !== this.activePane?.parentElement) ||
+                this.fullHeightClasses.some(({ el, parent }) => !el.isConnected || el.parentElement !== parent)) {
                 this.reset();
             }
         });
@@ -85,6 +109,10 @@ export default class SidebarExpandPlugin extends Plugin {
 
     private expand(pane: HTMLElement): void {
         this.reset();
+        if (this.settings.fullHeightEnabled || this.holdKeyDown) {
+            this.expandFullHeight(pane);
+            return;
+        }
         const parent = pane.parentElement;
         if (!parent || !parent.matches('.workspace-split, .nn-split-container')) return;
         // Respect horizontal third-party layouts instead of forcing them vertical.
@@ -116,8 +144,44 @@ export default class SidebarExpandPlugin extends Plugin {
         this.leaveTimer = null;
     }
 
+    private refreshExpansion(): void {
+        const pane = this.activePane;
+        if (pane && pane.isConnected && !this.resizing && !this.disposed) this.expand(pane);
+    }
+
+    private addFullHeightClass(el: HTMLElement, name: string): void {
+        if (el.classList.contains(name)) return;
+        this.fullHeightClasses.push({ el, name, parent: el.parentElement });
+        el.classList.add(name);
+    }
+
+    private expandFullHeight(pane: HTMLElement): void {
+        const sidebar = pane.closest<HTMLElement>('.mod-left-split, .mod-right-split');
+        if (!sidebar) return;
+        this.activePane = pane;
+        // Walk outward so nested groups can fill the whole sidebar's content area.
+        // Keep the sidebar's own controls and vault footer available.
+        let branch: HTMLElement = pane;
+        while (branch !== sidebar && branch.parentElement) {
+            const parent = branch.parentElement;
+            if (parent.matches('.workspace-split, .nn-split-container') &&
+                pane.win.getComputedStyle(parent).flexDirection === 'column') {
+                this.addFullHeightClass(branch, 'sidebar-expand-full-active');
+                for (const sibling of Array.from(parent.children)) {
+                    if (sibling === branch || !sibling.instanceOf(HTMLElement)) continue;
+                    if (sibling.matches(`${PANE_SELECTOR}, .workspace-split, ${RESIZE_SELECTOR}`)) {
+                        this.addFullHeightClass(sibling, 'sidebar-expand-full-hidden');
+                    }
+                }
+            }
+            branch = parent;
+        }
+    }
+
     private reset(): void {
         this.clearLeaveTimer();
+        for (const { el, name } of this.fullHeightClasses) el.classList.remove(name);
+        this.fullHeightClasses = [];
         for (const { el, values } of this.panes) {
             el.classList.remove('sidebar-expand-managed');
             VARIABLES.forEach((name, index) => {
@@ -139,8 +203,14 @@ export default class SidebarExpandPlugin extends Plugin {
 
     async saveSettings(): Promise<void> {
         this.settings = normalizeSettings(this.settings);
-        this.reset();
+        this.refreshExpansion();
         await this.saveData(this.settings);
+    }
+
+    async setHoldKey(value: string): Promise<void> {
+        this.settings = normalizeSettings({ ...this.settings, fullHeightHoldKey: value });
+        this.holdKeyDown = false;
+        await this.saveSettings();
     }
 }
 
@@ -160,6 +230,30 @@ class SidebarExpandSettingTab extends PluginSettingTab {
 
     getSettingDefinitions() {
         return [
+            {
+                name: 'Full-height hover',
+                desc: 'Fill the sidebar content area while hovering, ignoring the expansion percentage. You can also toggle this with a command in Hotkeys.',
+                render: (setting: Setting) => {
+                    setting.addToggle(toggle => toggle
+                        .setValue(this.sidebarPlugin.settings.fullHeightEnabled)
+                        .onChange(async value => {
+                            this.sidebarPlugin.settings.fullHeightEnabled = value;
+                            await this.sidebarPlugin.saveSettings();
+                        }));
+                }
+            },
+            {
+                name: 'Full-height hold key',
+                desc: 'Hold this modifier while hovering to temporarily fill the sidebar. Release it to return to percentage expansion when the toggle is off.',
+                render: (setting: Setting) => {
+                    setting.addDropdown(dropdown => dropdown
+                        .addOptions({ Alt: 'Alt / Option', Control: 'Control', Shift: 'Shift', Meta: 'Command / Windows', None: 'Disabled' })
+                        .setValue(this.sidebarPlugin.settings.fullHeightHoldKey)
+                        .onChange(async value => {
+                            await this.sidebarPlugin.setHoldKey(value);
+                        }));
+                }
+            },
             {
                 name: 'Expansion amount',
                 desc: 'Extra height as a percentage of the stacked panes. Default: 18%.',

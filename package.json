@@ -1,6 +1,6 @@
 {
   "name": "sidebar-expand-on-hover",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Expand stacked sidebar panes vertically on hover.",
   "main": "main.js",
   "scripts": {
