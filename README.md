@@ -2,6 +2,8 @@
 
 Expand stacked sidebar panes vertically when you hover over them. Neighbouring panes temporarily shrink, and their original sizes return when you move away. Works in the left and right sidebars of the main Obsidian window.
 
+![vertical expand on hover](https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExNmwzaTh3eXVtOHk5YWQwNHFmYWFxeHg3M2d3MmM0YWhmY3Q1bjZkcyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/tXEd5QMz5zqtBc1Boh/giphy.gif)
+
 ## Use
 
 1. Arrange at least two tab groups vertically in a sidebar by dragging a tab into the upper or lower part of that sidebar.
