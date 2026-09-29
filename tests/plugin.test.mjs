@@ -8,7 +8,7 @@ import { JSDOM } from 'jsdom';
 const compiled = await build({ entryPoints: ['src/layout.ts'], bundle: true, format: 'cjs', write: false });
 const mathModule = { exports: {} };
 vm.runInNewContext(compiled.outputFiles[0].text, { module: mathModule, exports: mathModule.exports });
-const { targetHeights, normalizeSettings } = mathModule.exports;
+const { targetHeights, notebookNavigatorHeights, normalizeSettings } = mathModule.exports;
 const sum = values => values.reduce((a, b) => a + b, 0);
 
 test('expansion preserves total height for uneven panes and exhausted neighbours', () => {
@@ -29,13 +29,22 @@ test('expansion preserves total height for uneven panes and exhausted neighbours
     assert.deepEqual(Array.from(targetHeights([200, 200], 0, 20)), [280, 120]);
 });
 
+test('Notebook Navigator reaches the local pane ratios without losing custom sizes', () => {
+    assert.deepEqual(Array.from(notebookNavigatorHeights([300, 300], 0)), [396, 204]);
+    assert.deepEqual(Array.from(notebookNavigatorHeights([180, 420], 0)), [396, 204]);
+    assert.deepEqual(Array.from(notebookNavigatorHeights([300, 300, 300], 1)), [261, 378, 261]);
+    assert.deepEqual(Array.from(notebookNavigatorHeights([500, 100], 0)), [500, 100]);
+});
+
 test('invalid saved settings are bounded or replaced with defaults', () => {
     for (const saved of [null, 'bad', [], { expansionAmount: NaN, transitionDuration: Infinity }]) {
-        assert.equal(normalizeSettings(saved).expansionAmount, 18);
+        assert.equal(normalizeSettings(saved).expansionAmount, 12);
         assert.equal(normalizeSettings(saved).transitionDuration, 300);
+        assert.equal(normalizeSettings(saved).notebookNavigatorSupport, true);
     }
     assert.equal(normalizeSettings({ expansionAmount: 900 }).expansionAmount, 50);
     assert.equal(normalizeSettings({ transitionDuration: -100 }).transitionDuration, 0);
+    assert.equal(normalizeSettings({ notebookNavigatorSupport: false }).notebookNavigatorSupport, false);
 });
 
 async function fixture() {
@@ -92,8 +101,8 @@ test('hovering headers expands; leaving restores exact inline sizing and priorit
     const f = await fixture(); f.ready();
     const before = f.panes.map(el => el.style.cssText);
     f.mouse(f.panes[0].firstElementChild, 'mouseover');
-    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '508');
-    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '92');
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '128');
     f.mouse(f.panes[0].lastElementChild, 'mouseout', f.panes[0].firstElementChild);
     assert.equal(f.timers.size, 0);
     f.mouse(f.panes[0], 'mouseout'); f.flush();
@@ -108,7 +117,7 @@ test('switching panes and rapid re-entry cannot leave stale expanded groups', as
     f.mouse(f.panes[0], 'mouseover');
     f.mouse(f.panes[0], 'mouseout', f.panes[1]);
     f.mouse(f.panes[1], 'mouseover'); f.flush();
-    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '308');
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
     f.mouse(f.panes[1], 'mouseout'); f.mouse(f.panes[1], 'mouseover'); f.flush();
     assert.equal(f.panes[1].classList.contains('sidebar-expand-managed'), true);
     f.layout();
@@ -176,12 +185,39 @@ test('right sidebar and newly added vertical Notebook Navigator panes expand wit
         parent.appendChild(el); return el;
     });
     f.mouse(panes[0], 'mouseover');
-    assert.equal(panes[0].style.getPropertyValue('--sidebar-expand-weight'), '408');
+    assert.equal(panes[0].style.getPropertyValue('--sidebar-expand-weight'), '396');
     f.mouse(panes[0], 'mouseout'); f.flush();
     parent.style.flexDirection = 'row';
     f.mouse(panes[0], 'mouseover');
     assert.equal(panes[0].classList.contains('sidebar-expand-managed'), false);
     assert.equal(parent.style.flexDirection, 'row');
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('Notebook Navigator support can be disabled and geometry protects horizontal layouts', async () => {
+    const f = await fixture(); f.ready();
+    const parent = f.window.document.createElement('div');
+    parent.className = 'nn-split-container';
+    parent.style.flexDirection = 'column';
+    f.root.querySelector('.mod-left-split').appendChild(parent);
+    const panes = ['nn-navigation-pane', 'nn-list-pane'].map((className, index) => {
+        const el = f.window.document.createElement('div');
+        el.className = className;
+        Object.defineProperty(el, 'offsetHeight', { get: () => 300 });
+        el.getBoundingClientRect = () => ({ left: index * 300, top: 0, width: 300, height: 300 });
+        parent.appendChild(el);
+        return el;
+    });
+    f.mouse(panes[0], 'mouseover');
+    assert.equal(parent.querySelectorAll('.sidebar-expand-managed').length, 0);
+    panes.forEach((el, index) => { el.getBoundingClientRect = () => ({ left: 0, top: index * 300, width: 300, height: 300 }); });
+    f.mouse(panes[0], 'mouseover');
+    assert.equal(panes[0].style.getPropertyValue('--sidebar-expand-weight'), '396');
+    f.plugin.settings.notebookNavigatorSupport = false;
+    await f.plugin.saveSettings();
+    assert.equal(parent.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.mouse(panes[0], 'mouseover', null, { altKey: true });
+    assert.equal(parent.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
     f.plugin.unload(); f.dom.window.close();
 });
 
@@ -242,7 +278,7 @@ test('toggle command persists full-height mode and has no conflicting default ho
     await f.plugin.command.callback();
     assert.equal(f.plugin.saved.fullHeightEnabled, false);
     assert.equal(f.root.querySelectorAll('[class*="sidebar-expand-full-"]').length, 0);
-    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '308');
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
     f.plugin.unload(); f.dom.window.close();
 });
 

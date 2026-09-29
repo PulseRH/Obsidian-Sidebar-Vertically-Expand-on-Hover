@@ -10,7 +10,9 @@ Expand stacked sidebar panes vertically when you hover over them. Neighbouring p
 2. Hover over a pane or its tab headers to give it more room.
 3. Move outside the group to restore its previous size. Hover expansion pauses while you drag a resize handle.
 
-In the plugin's settings, adjust **Expansion amount** (4–50% of the stacked panes' combined height; default 18%) and **Transition duration** (0–2000 milliseconds; default 300). Expansion is limited by the space available in neighbouring panes. The plugin respects the operating system's reduced-motion preference.
+In the plugin's settings, adjust **Expansion amount** (4–50% of the stacked panes' combined height; default 12%) and **Transition duration** (0–2000 milliseconds; default 300). Expansion is limited by the space available in neighbouring panes. The plugin respects the operating system's reduced-motion preference.
+
+**Notebook Navigator support** is enabled by default. Its vertically stacked navigation and list panes expand to about 66% of their combined height when there are two panes, or 42% with three or more. Their previous custom sizes return when you move away. You can turn this support off in the plugin settings; side-by-side layouts remain unchanged.
 
 
 ### Full-height hover

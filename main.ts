@@ -1,7 +1,8 @@
 import { Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import { normalizeSettings, targetHeights, type SidebarExpandSettings } from './src/layout';
+import { normalizeSettings, notebookNavigatorHeights, targetHeights, type SidebarExpandSettings } from './src/layout';
 
 const PANE_SELECTOR = '.workspace-tabs, .nn-navigation-pane, .nn-list-pane';
+const NN_PANE_SELECTOR = '.nn-navigation-pane, .nn-list-pane';
 const RESIZE_SELECTOR = '.workspace-leaf-resize-handle, .nn-resizer-handle, .nn-resize-handle';
 const VARIABLES = ['--sidebar-expand-weight', '--sidebar-expand-min-height', '--sidebar-expand-duration'];
 interface PaneState {
@@ -107,25 +108,38 @@ export default class SidebarExpandPlugin extends Plugin {
         this.register(() => observer.disconnect());
     }
 
+    private isVerticallyStacked(parent: HTMLElement, panes: HTMLElement[]): boolean {
+        if (panes.length < 2) return false;
+        const first = panes[0].getBoundingClientRect();
+        const second = panes[1].getBoundingClientRect();
+        if (first.width > 0 && first.height > 0 && second.width > 0 && second.height > 0) {
+            return Math.abs(first.left - second.left) < 2 && second.top > first.top;
+        }
+        return parent.win.getComputedStyle(parent).flexDirection === 'column';
+    }
+
     private expand(pane: HTMLElement): void {
         this.reset();
-        if (this.settings.fullHeightEnabled || this.holdKeyDown) {
-            this.expandFullHeight(pane);
-            return;
-        }
+        const isNotebookNavigator = pane.matches(NN_PANE_SELECTOR);
+        if (isNotebookNavigator && !this.settings.notebookNavigatorSupport) return;
         const parent = pane.parentElement;
         if (!parent || !parent.matches('.workspace-split, .nn-split-container')) return;
-        // Respect horizontal third-party layouts instead of forcing them vertical.
-        if (pane.win.getComputedStyle(parent).flexDirection !== 'column') return;
         const siblings = Array.from(parent.children).filter((el): el is HTMLElement =>
             el.instanceOf(HTMLElement) &&
             el.matches('.workspace-tabs, .workspace-split, .nn-navigation-pane, .nn-list-pane') &&
             el.offsetHeight > 0
         );
+        if (isNotebookNavigator && !this.isVerticallyStacked(parent, siblings)) return;
+        if (this.settings.fullHeightEnabled || this.holdKeyDown) {
+            this.expandFullHeight(pane);
+            return;
+        }
+        if (!isNotebookNavigator && parent.win.getComputedStyle(parent).flexDirection !== 'column') return;
         const index = siblings.indexOf(pane);
         if (index < 0 || siblings.length < 2) return;
         const heights = siblings.map(el => el.offsetHeight);
-        const weights = targetHeights(heights, index, this.settings.expansionAmount);
+        const weights = isNotebookNavigator ? notebookNavigatorHeights(heights, index) :
+            targetHeights(heights, index, this.settings.expansionAmount);
         this.activePane = pane;
         this.panes = siblings.map(el => ({
             el,
@@ -133,7 +147,8 @@ export default class SidebarExpandPlugin extends Plugin {
         }));
         siblings.forEach((el, i) => {
             el.style.setProperty('--sidebar-expand-weight', String(weights[i]));
-            el.style.setProperty('--sidebar-expand-min-height', `${Math.min(40, heights[i])}px`);
+            const minimum = isNotebookNavigator ? Math.min(heights[i], Math.max(60, heights[i] * 0.2)) : Math.min(40, heights[i]);
+            el.style.setProperty('--sidebar-expand-min-height', `${minimum}px`);
             el.style.setProperty('--sidebar-expand-duration', `${this.settings.transitionDuration}ms`);
             el.classList.add('sidebar-expand-managed');
         });
@@ -255,8 +270,20 @@ class SidebarExpandSettingTab extends PluginSettingTab {
                 }
             },
             {
+                name: 'Notebook Navigator support',
+                desc: 'Expand Notebook Navigator navigation and list panes when they are stacked vertically. Side-by-side panes are left unchanged.',
+                render: (setting: Setting) => {
+                    setting.addToggle(toggle => toggle
+                        .setValue(this.sidebarPlugin.settings.notebookNavigatorSupport)
+                        .onChange(async value => {
+                            this.sidebarPlugin.settings.notebookNavigatorSupport = value;
+                            await this.sidebarPlugin.saveSettings();
+                        }));
+                }
+            },
+            {
                 name: 'Expansion amount',
-                desc: 'Extra height as a percentage of the stacked panes. Default: 18%.',
+                desc: 'Extra height as a percentage of the stacked panes. Default: 12%.',
                 render: (setting: Setting) => {
                     setting.addSlider(slider => slider
                         .setLimits(4, 50, 2)
