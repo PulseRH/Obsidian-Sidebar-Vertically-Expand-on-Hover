@@ -76,6 +76,7 @@ export default class SidebarExpandPlugin extends Plugin {
                 this.reset();
             }, 50);
         });
+        // Run before native handle listeners read pane sizes or stop propagation.
         this.registerDomEvent(root, 'mousedown', (event: MouseEvent) => {
             const target = event.target as Node | null;
             if (!(target?.instanceOf(Element)) || !target.closest(RESIZE_SELECTOR)) return;
@@ -83,7 +84,7 @@ export default class SidebarExpandPlugin extends Plugin {
             this.reset();
             this.resizing = true;
             if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
-        });
+        }, { capture: true });
         this.registerDomEvent(root.doc, 'mouseup', () => {
             if (!this.resizing) return;
             if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
@@ -91,7 +92,7 @@ export default class SidebarExpandPlugin extends Plugin {
                 this.resizeTimer = null;
                 this.resizing = false;
             }, 200);
-        });
+        }, { capture: true });
         this.registerDomEvent(root.win, 'blur', () => {
             this.holdKeyDown = false;
             this.resizing = false;
