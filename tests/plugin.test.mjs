@@ -75,9 +75,9 @@ async function fixture() {
         addCommand(command) { this.command = command; }
         register(callback) { this.cleanups.push(callback); }
         registerEvent(event) { this.register(event.off); }
-        registerDomEvent(el, name, callback) {
-            el.addEventListener(name, callback);
-            this.register(() => el.removeEventListener(name, callback));
+        registerDomEvent(el, name, callback, options) {
+            el.addEventListener(name, callback, options);
+            this.register(() => el.removeEventListener(name, callback, options));
         }
         unload() { this.onunload(); this.cleanups.splice(0).forEach(callback => callback()); }
     }
@@ -139,6 +139,45 @@ test('resize dragging suppresses hover; unloading cancels timers and listeners',
     assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
     f.dom.window.close();
 });
+
+for (const className of ['workspace-leaf-resize-handle', 'nn-resizer-handle', 'nn-resize-handle']) {
+    test(`${className} restores sizing before native drag handlers and preserves the resized layout`, async () => {
+        const f = await fixture(); f.ready();
+        const before = f.panes.map(el => el.style.cssText);
+        const handle = f.window.document.createElement('div');
+        handle.className = className;
+        const grip = handle.appendChild(f.window.document.createElement('span'));
+        f.panes[0].after(handle);
+        let sizesAtDragStart;
+        handle.addEventListener('mousedown', event => {
+            sizesAtDragStart = f.panes.map(el => el.style.cssText);
+            // Obsidian and third-party handles can consume the native events.
+            event.stopPropagation();
+        });
+        handle.addEventListener('mouseup', event => event.stopPropagation());
+
+        f.mouse(f.panes[0], 'mouseover');
+        f.mouse(grip, 'mousedown');
+        assert.deepEqual(sizesAtDragStart, before);
+        f.mouse(f.panes[1], 'mouseover');
+        assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+
+        // Simulate native dragging committing a new user-selected split.
+        f.panes[0].style.flex = '3 1 0px';
+        f.panes[1].style.flex = '2 1 0px';
+        const resized = f.panes.map(el => el.style.cssText);
+        f.mouse(grip, 'mouseup');
+        assert.equal(f.timers.size, 1);
+        f.mouse(f.panes[1], 'mouseover');
+        assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+        f.flush();
+        f.mouse(f.panes[1], 'mouseover');
+        assert.equal(f.panes[1].classList.contains('sidebar-expand-managed'), true);
+        f.mouse(f.panes[1], 'mouseout'); f.flush();
+        assert.deepEqual(f.panes.map(el => el.style.cssText), resized);
+        f.plugin.unload(); f.dom.window.close();
+    });
+}
 
 test('unloading during hover restores custom properties and leaves no timer work', async () => {
     const f = await fixture(); f.ready();
