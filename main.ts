@@ -19,6 +19,7 @@ export default class SidebarExpandPlugin extends Plugin {
     private resizing = false;
     private disposed = false;
     private holdKeyDown = false;
+    private handleGuard = false;
     private fullHeightClasses: { el: HTMLElement; name: string; parent: HTMLElement | null }[] = [];
 
     async onload(): Promise<void> {
@@ -53,17 +54,11 @@ export default class SidebarExpandPlugin extends Plugin {
         };
         this.registerDomEvent(root.doc, 'keydown', updateHoldKey);
         this.registerDomEvent(root.doc, 'keyup', updateHoldKey);
-        this.registerDomEvent(root, 'mouseover', (event: MouseEvent) => {
-            if (this.disposed || this.resizing) return;
-            const target = event.target as Node | null;
-            if (!(target?.instanceOf(Element))) return;
-            const pane = target.closest<HTMLElement>(PANE_SELECTOR);
-            if (!pane || !pane.closest('.mod-left-split, .mod-right-split')) return;
-            const held = this.settings.fullHeightHoldKey !== 'None' && event.getModifierState(this.settings.fullHeightHoldKey);
-            const changed = held !== this.holdKeyDown;
-            this.holdKeyDown = held;
-            this.clearLeaveTimer();
-            if (pane !== this.activePane || changed) this.expand(pane);
+        this.registerDomEvent(root, 'mouseover', (event: MouseEvent) => this.hover(event));
+        // Pointer moves inside one pane raise no mouseover, so poll only while a
+        // resize handle holds the layout still, to notice the pointer leaving it.
+        this.registerDomEvent(root, 'mousemove', (event: MouseEvent) => {
+            if (this.handleGuard) this.hover(event);
         });
         this.registerDomEvent(root, 'mouseout', (event: MouseEvent) => {
             const pane = this.activePane;
@@ -154,6 +149,45 @@ export default class SidebarExpandPlugin extends Plugin {
         });
     }
 
+    /** Hovering a resize handle, or the margin around it, freezes the current
+     *  layout so the handle stays where it is while you reach for it. */
+    private isOverResizeHandle(target: Element, sidebar: HTMLElement, event: MouseEvent): boolean {
+        if (target.closest(RESIZE_SELECTOR)) return true;
+        const margin = this.settings.resizeHandleMargin;
+        if (margin <= 0) return false;
+        for (const handle of Array.from(sidebar.querySelectorAll<HTMLElement>(RESIZE_SELECTOR))) {
+            if (handle.offsetHeight <= 0 && handle.offsetWidth <= 0) continue;
+            const rect = handle.getBoundingClientRect();
+            if (event.clientX >= rect.left - margin && event.clientX <= rect.right + margin &&
+                event.clientY >= rect.top - margin && event.clientY <= rect.bottom + margin) return true;
+        }
+        return false;
+    }
+
+    private hover(event: MouseEvent): void {
+        if (this.disposed || this.resizing) return;
+        const target = event.target as Node | null;
+        if (!(target?.instanceOf(Element))) return;
+        const sidebar = target.closest<HTMLElement>('.mod-left-split, .mod-right-split');
+        if (!sidebar) {
+            this.handleGuard = false;
+            return;
+        }
+        if (this.isOverResizeHandle(target, sidebar, event)) {
+            this.handleGuard = true;
+            this.clearLeaveTimer();
+            return;
+        }
+        this.handleGuard = false;
+        const pane = target.closest<HTMLElement>(PANE_SELECTOR);
+        if (!pane) return;
+        const held = this.settings.fullHeightHoldKey !== 'None' && event.getModifierState(this.settings.fullHeightHoldKey);
+        const changed = held !== this.holdKeyDown;
+        this.holdKeyDown = held;
+        this.clearLeaveTimer();
+        if (pane !== this.activePane || changed) this.expand(pane);
+    }
+
     private clearLeaveTimer(): void {
         if (this.leaveTimer !== null) window.clearTimeout(this.leaveTimer);
         this.leaveTimer = null;
@@ -195,6 +229,7 @@ export default class SidebarExpandPlugin extends Plugin {
 
     private reset(): void {
         this.clearLeaveTimer();
+        this.handleGuard = false;
         for (const { el, name } of this.fullHeightClasses) el.classList.remove(name);
         this.fullHeightClasses = [];
         for (const { el, values } of this.panes) {
@@ -291,6 +326,20 @@ class SidebarExpandSettingTab extends PluginSettingTab {
                         .setDynamicTooltip()
                         .onChange(async value => {
                             this.sidebarPlugin.settings.expansionAmount = value;
+                            await this.sidebarPlugin.saveSettings();
+                        }));
+                }
+            },
+            {
+                name: 'Resize handle margin',
+                desc: 'Keep the layout still within this many pixels of a resize handle so you can drag it without expanding a pane. Set to 0 to disable. Default: 6.',
+                render: (setting: Setting) => {
+                    setting.addSlider(slider => slider
+                        .setLimits(0, 24, 2)
+                        .setValue(this.sidebarPlugin.settings.resizeHandleMargin)
+                        .setDynamicTooltip()
+                        .onChange(async value => {
+                            this.sidebarPlugin.settings.resizeHandleMargin = value;
                             await this.sidebarPlugin.saveSettings();
                         }));
                 }

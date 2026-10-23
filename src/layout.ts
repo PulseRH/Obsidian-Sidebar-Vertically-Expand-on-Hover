@@ -1,6 +1,7 @@
 export interface SidebarExpandSettings {
     expansionAmount: number;
     transitionDuration: number;
+    resizeHandleMargin: number;
     notebookNavigatorSupport: boolean;
     fullHeightEnabled: boolean;
     fullHeightHoldKey: 'Alt' | 'Control' | 'Shift' | 'Meta' | 'None';
@@ -13,6 +14,7 @@ export function normalizeSettings(value: unknown): SidebarExpandSettings {
     return {
         expansionAmount: bounded(saved.expansionAmount, 12, 4, 50),
         transitionDuration: bounded(saved.transitionDuration, 300, 0, 2000),
+        resizeHandleMargin: bounded(saved.resizeHandleMargin, 6, 0, 24),
         notebookNavigatorSupport: saved.notebookNavigatorSupport !== false,
         fullHeightEnabled: saved.fullHeightEnabled === true,
         fullHeightHoldKey: saved.fullHeightHoldKey === 'Control' || saved.fullHeightHoldKey === 'Shift' ||

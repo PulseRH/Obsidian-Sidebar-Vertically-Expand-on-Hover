@@ -60,6 +60,9 @@ async function fixture() {
     const root = window.document.querySelector('#workspace');
     const panes = [...root.querySelectorAll('.mod-left-split > .workspace-tabs')];
     panes.forEach((el, i) => Object.defineProperty(el, 'offsetHeight', { get: () => i ? 200 : 400 }));
+    const handle = root.querySelector('.workspace-leaf-resize-handle');
+    Object.defineProperty(handle, 'offsetHeight', { get: () => 4 });
+    handle.getBoundingClientRect = () => ({ left: 0, right: 300, top: 400, bottom: 404, width: 300, height: 4 });
     let layoutCallback;
     let ready;
     class Plugin {
@@ -94,7 +97,7 @@ async function fixture() {
     const mouse = (el, name, relatedTarget = null, modifiers = {}) => el.dispatchEvent(new window.MouseEvent(name, { bubbles: true, relatedTarget, ...modifiers }));
     const key = (name, key, modifiers = {}) => window.document.dispatchEvent(new window.KeyboardEvent(name, { key, bubbles: true, ...modifiers }));
     const flush = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); };
-    return { dom, window, root, panes, plugin, timers, mouse, key, flush, ready: () => ready(), layout: () => layoutCallback?.() };
+    return { dom, window, root, panes, handle, plugin, timers, mouse, key, flush, ready: () => ready(), layout: () => layoutCallback?.() };
 }
 
 test('hovering headers expands; leaving restores exact inline sizing and priorities', async () => {
@@ -333,4 +336,47 @@ test('full-height mode restores hidden siblings if the active pane is removed', 
     assert.equal(f.panes[1].classList.contains('sidebar-expand-full-hidden'), false);
     assert.equal(f.panes[0].classList.contains('sidebar-expand-full-active'), false);
     f.plugin.unload(); f.dom.window.close();
+});
+
+test('resize handles never trigger expansion and hold the layout still while hovered', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.handle, 'mouseover');
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    assert.equal(f.timers.size, 0);
+    f.mouse(f.panes[0], 'mouseover', null, { clientY: 100 });
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    f.mouse(f.panes[0], 'mouseout', f.handle);
+    f.mouse(f.handle, 'mouseover');
+    f.flush();
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    f.mouse(f.handle, 'mouseout');
+    f.flush();
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('the margin around a handle suppresses expansion until the pointer moves away', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.panes[0], 'mouseover', null, { clientY: 397 });
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.mouse(f.panes[0], 'mousemove', null, { clientY: 399 });
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.mouse(f.panes[0], 'mousemove', null, { clientY: 100 });
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    f.mouse(f.panes[0], 'mousemove', null, { clientY: 110 });
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    f.plugin.settings.resizeHandleMargin = 0;
+    await f.plugin.saveSettings();
+    f.mouse(f.panes[1], 'mouseover', null, { clientY: 405 });
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
+    f.mouse(f.handle, 'mouseover', null, { clientY: 402 });
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('handle margin is bounded and defaults to six pixels', () => {
+    assert.equal(normalizeSettings(null).resizeHandleMargin, 6);
+    assert.equal(normalizeSettings({ resizeHandleMargin: 99 }).resizeHandleMargin, 24);
+    assert.equal(normalizeSettings({ resizeHandleMargin: -5 }).resizeHandleMargin, 0);
+    assert.equal(normalizeSettings({ resizeHandleMargin: 'x' }).resizeHandleMargin, 6);
 });
