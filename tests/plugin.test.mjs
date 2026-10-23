@@ -59,7 +59,10 @@ async function fixture() {
     window.clearTimeout = id => timers.delete(id);
     const root = window.document.querySelector('#workspace');
     const panes = [...root.querySelectorAll('.mod-left-split > .workspace-tabs')];
-    panes.forEach((el, i) => Object.defineProperty(el, 'offsetHeight', { get: () => i ? 200 : 400 }));
+    panes.forEach((el, i) => Object.defineProperty(el, 'offsetHeight', { get: () => i ? 200 : 400, configurable: true }));
+    const handle = root.querySelector('.workspace-leaf-resize-handle');
+    Object.defineProperty(handle, 'offsetHeight', { get: () => 4 });
+    handle.getBoundingClientRect = () => ({ left: 0, right: 300, top: 400, bottom: 404, width: 300, height: 4 });
     let layoutCallback;
     let ready;
     class Plugin {
@@ -75,9 +78,9 @@ async function fixture() {
         addCommand(command) { this.command = command; }
         register(callback) { this.cleanups.push(callback); }
         registerEvent(event) { this.register(event.off); }
-        registerDomEvent(el, name, callback) {
-            el.addEventListener(name, callback);
-            this.register(() => el.removeEventListener(name, callback));
+        registerDomEvent(el, name, callback, options) {
+            el.addEventListener(name, callback, options);
+            this.register(() => el.removeEventListener(name, callback, options));
         }
         unload() { this.onunload(); this.cleanups.splice(0).forEach(callback => callback()); }
     }
@@ -93,8 +96,10 @@ async function fixture() {
     await plugin.onload();
     const mouse = (el, name, relatedTarget = null, modifiers = {}) => el.dispatchEvent(new window.MouseEvent(name, { bubbles: true, relatedTarget, ...modifiers }));
     const key = (name, key, modifiers = {}) => window.document.dispatchEvent(new window.KeyboardEvent(name, { key, bubbles: true, ...modifiers }));
-    const flush = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); };
-    return { dom, window, root, panes, plugin, timers, mouse, key, flush, ready: () => ready(), layout: () => layoutCallback?.() };
+    // step runs the timers pending now; flush keeps going until none are left.
+    const step = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); };
+    const flush = () => { while (timers.size) step(); };
+    return { dom, window, root, panes, handle, plugin, timers, mouse, key, step, flush, ready: () => ready(), layout: () => layoutCallback?.() };
 }
 
 test('hovering headers expands; leaving restores exact inline sizing and priorities', async () => {
@@ -332,5 +337,118 @@ test('full-height mode restores hidden siblings if the active pane is removed', 
     f.panes[0].remove(); await Promise.resolve();
     assert.equal(f.panes[1].classList.contains('sidebar-expand-full-hidden'), false);
     assert.equal(f.panes[0].classList.contains('sidebar-expand-full-active'), false);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('resize handles never trigger expansion and hold the layout still while hovered', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.handle, 'mouseover');
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    assert.equal(f.timers.size, 0);
+    f.mouse(f.panes[0], 'mouseover', null, { clientY: 100 });
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    f.mouse(f.panes[0], 'mouseout', f.handle);
+    f.mouse(f.handle, 'mouseover');
+    f.flush();
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    f.mouse(f.handle, 'mouseout');
+    f.flush();
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('the margin around a handle suppresses expansion until the pointer moves away', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.panes[0], 'mouseover', null, { clientY: 397 });
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.mouse(f.panes[0], 'mousemove', null, { clientY: 399 });
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.mouse(f.panes[0], 'mousemove', null, { clientY: 100 });
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    f.mouse(f.panes[0], 'mousemove', null, { clientY: 110 });
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '472');
+    f.plugin.settings.resizeHandleMargin = 0;
+    await f.plugin.saveSettings();
+    f.mouse(f.panes[1], 'mouseover', null, { clientY: 405 });
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
+    f.mouse(f.handle, 'mouseover', null, { clientY: 402 });
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('handle margin is bounded and defaults to six pixels', () => {
+    assert.equal(normalizeSettings(null).resizeHandleMargin, 6);
+    assert.equal(normalizeSettings({ resizeHandleMargin: 99 }).resizeHandleMargin, 24);
+    assert.equal(normalizeSettings({ resizeHandleMargin: -5 }).resizeHandleMargin, 0);
+    assert.equal(normalizeSettings({ resizeHandleMargin: 'x' }).resizeHandleMargin, 6);
+});
+
+test('moving between panes of an expanded group re-weights without snapping back first', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.panes[0], 'mouseover');
+    const removed = [];
+    f.panes.forEach(el => {
+        const remove = el.classList.remove.bind(el.classList);
+        el.classList.remove = (...names) => { removed.push(...names); remove(...names); };
+        // Expanded sizes must not be mistaken for the user's own sizes.
+        Object.defineProperty(el, 'offsetHeight', { get: () => el === f.panes[0] ? 472 : 128 });
+    });
+    f.mouse(f.panes[0], 'mouseout', f.panes[1]);
+    f.mouse(f.panes[1], 'mouseover');
+    assert.deepEqual(removed, []);
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '328');
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
+    f.mouse(f.panes[1], 'mouseout'); f.flush();
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('leaving the sidebar eases panes back to their own sizes before handing sizing back', async () => {
+    const f = await fixture(); f.ready();
+    const before = f.panes.map(el => el.style.cssText);
+    f.mouse(f.panes[0], 'mouseover');
+    f.mouse(f.panes[0], 'mouseout'); f.step();
+    assert.ok(f.panes.every(el => el.classList.contains('sidebar-expand-managed')));
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '400');
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '200');
+    assert.equal(f.timers.size, 1);
+    f.step();
+    assert.deepEqual(f.panes.map(el => el.style.cssText), before);
+    // Coming back mid-collapse picks the animation up instead of snapping.
+    f.mouse(f.panes[0], 'mouseover');
+    f.mouse(f.panes[0], 'mouseout'); f.step();
+    f.mouse(f.panes[1], 'mouseover');
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
+    f.plugin.settings.transitionDuration = 0;
+    f.mouse(f.panes[1], 'mouseout'); f.step();
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('expansion amount setting is hidden while full-height hover is on', async () => {
+    const f = await fixture(); f.ready();
+    const amount = f.plugin.tab.getSettingDefinitions().find(definition => definition.name === 'Expansion amount');
+    assert.equal(amount.hidden(), false);
+    f.plugin.settings.fullHeightEnabled = true;
+    assert.equal(amount.hidden(), true);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('grabbing a handle releases the expansion even when the drag handler swallows the events', async () => {
+    const f = await fixture(); f.ready();
+    // Like Obsidian: stop propagation, and cancel pointerdown so no mousedown/mouseup follow.
+    f.handle.addEventListener('pointerdown', event => { event.preventDefault(); event.stopPropagation(); });
+    f.mouse(f.panes[0], 'mouseover', null, { clientY: 100 });
+    f.mouse(f.handle, 'mouseover');
+    assert.equal(f.panes[0].classList.contains('sidebar-expand-managed'), true);
+    f.handle.dispatchEvent(new f.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.mouse(f.panes[1], 'mouseover', null, { clientY: 500 });
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.window.document.dispatchEvent(new f.window.MouseEvent('pointerup', { bubbles: true }));
+    f.flush();
+    f.mouse(f.panes[1], 'mouseover', null, { clientY: 500 });
+    assert.equal(f.panes[1].classList.contains('sidebar-expand-managed'), true);
     f.plugin.unload(); f.dom.window.close();
 });

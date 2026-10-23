@@ -14,11 +14,15 @@ export default class SidebarExpandPlugin extends Plugin {
     settings: SidebarExpandSettings = normalizeSettings(null);
     private activePane: HTMLElement | null = null;
     private panes: PaneState[] = [];
+    private heights: number[] = [];
+    private group: HTMLElement | null = null;
     private leaveTimer: number | null = null;
+    private collapseTimer: number | null = null;
     private resizeTimer: number | null = null;
     private resizing = false;
     private disposed = false;
     private holdKeyDown = false;
+    private handleGuard = false;
     private fullHeightClasses: { el: HTMLElement; name: string; parent: HTMLElement | null }[] = [];
 
     async onload(): Promise<void> {
@@ -53,17 +57,11 @@ export default class SidebarExpandPlugin extends Plugin {
         };
         this.registerDomEvent(root.doc, 'keydown', updateHoldKey);
         this.registerDomEvent(root.doc, 'keyup', updateHoldKey);
-        this.registerDomEvent(root, 'mouseover', (event: MouseEvent) => {
-            if (this.disposed || this.resizing) return;
-            const target = event.target as Node | null;
-            if (!(target?.instanceOf(Element))) return;
-            const pane = target.closest<HTMLElement>(PANE_SELECTOR);
-            if (!pane || !pane.closest('.mod-left-split, .mod-right-split')) return;
-            const held = this.settings.fullHeightHoldKey !== 'None' && event.getModifierState(this.settings.fullHeightHoldKey);
-            const changed = held !== this.holdKeyDown;
-            this.holdKeyDown = held;
-            this.clearLeaveTimer();
-            if (pane !== this.activePane || changed) this.expand(pane);
+        this.registerDomEvent(root, 'mouseover', (event: MouseEvent) => this.hover(event));
+        // Pointer moves inside one pane raise no mouseover, so poll only while a
+        // resize handle holds the layout still, to notice the pointer leaving it.
+        this.registerDomEvent(root, 'mousemove', (event: MouseEvent) => {
+            if (this.handleGuard) this.hover(event);
         });
         this.registerDomEvent(root, 'mouseout', (event: MouseEvent) => {
             const pane = this.activePane;
@@ -73,25 +71,35 @@ export default class SidebarExpandPlugin extends Plugin {
             this.clearLeaveTimer();
             this.leaveTimer = window.setTimeout(() => {
                 this.leaveTimer = null;
-                this.reset();
+                this.collapse();
             }, 50);
         });
-        this.registerDomEvent(root, 'mousedown', (event: MouseEvent) => {
+        // Release the expansion before Obsidian starts dragging, or the managed
+        // sizes override its own and the handle appears stuck until you let go.
+        // Capture phase, and pointer events too: Obsidian's drag handler may stop
+        // propagation, and cancelling pointerdown suppresses mousedown/mouseup.
+        const startResize = (event: MouseEvent): void => {
             const target = event.target as Node | null;
             if (!(target?.instanceOf(Element)) || !target.closest(RESIZE_SELECTOR)) return;
             if (!target.closest('.mod-left-split, .mod-right-split')) return;
             this.reset();
             this.resizing = true;
             if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
-        });
-        this.registerDomEvent(root.doc, 'mouseup', () => {
+            this.resizeTimer = null;
+        };
+        const endResize = (): void => {
             if (!this.resizing) return;
             if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
             this.resizeTimer = window.setTimeout(() => {
                 this.resizeTimer = null;
                 this.resizing = false;
             }, 200);
-        });
+        };
+        this.registerDomEvent(root, 'pointerdown', startResize, { capture: true });
+        this.registerDomEvent(root, 'mousedown', startResize, { capture: true });
+        this.registerDomEvent(root.doc, 'pointerup', endResize, { capture: true });
+        this.registerDomEvent(root.doc, 'pointercancel', endResize, { capture: true });
+        this.registerDomEvent(root.doc, 'mouseup', endResize, { capture: true });
         this.registerDomEvent(root.win, 'blur', () => {
             this.holdKeyDown = false;
             this.resizing = false;
@@ -99,7 +107,7 @@ export default class SidebarExpandPlugin extends Plugin {
         });
         // Delegation covers new tabs; restore when an active pane moves or closes.
         const observer = new MutationObserver(() => {
-            if (this.panes.some(({ el }) => !el.isConnected || el.parentElement !== this.activePane?.parentElement) ||
+            if (this.panes.some(({ el }) => !el.isConnected || el.parentElement !== this.group) ||
                 this.fullHeightClasses.some(({ el, parent }) => !el.isConnected || el.parentElement !== parent)) {
                 this.reset();
             }
@@ -118,17 +126,37 @@ export default class SidebarExpandPlugin extends Plugin {
         return parent.win.getComputedStyle(parent).flexDirection === 'column';
     }
 
-    private expand(pane: HTMLElement): void {
-        this.reset();
-        const isNotebookNavigator = pane.matches(NN_PANE_SELECTOR);
-        if (isNotebookNavigator && !this.settings.notebookNavigatorSupport) return;
-        const parent = pane.parentElement;
-        if (!parent || !parent.matches('.workspace-split, .nn-split-container')) return;
-        const siblings = Array.from(parent.children).filter((el): el is HTMLElement =>
+    private stackedSiblings(parent: HTMLElement): HTMLElement[] {
+        return Array.from(parent.children).filter((el): el is HTMLElement =>
             el.instanceOf(HTMLElement) &&
             el.matches('.workspace-tabs, .workspace-split, .nn-navigation-pane, .nn-list-pane') &&
             el.offsetHeight > 0
         );
+    }
+
+    private expand(pane: HTMLElement): void {
+        const isNotebookNavigator = pane.matches(NN_PANE_SELECTOR);
+        const parent = pane.parentElement;
+        // Moving to another pane of the group that is already expanded only
+        // re-weights it. Resetting first would snap the old pane back to its
+        // original size for a frame before the new one starts growing.
+        if (parent && this.panes.length > 0 && this.fullHeightClasses.length === 0 &&
+            !this.settings.fullHeightEnabled && !this.holdKeyDown &&
+            !(isNotebookNavigator && !this.settings.notebookNavigatorSupport) &&
+            parent === this.panes[0].el.parentElement) {
+            const siblings = this.stackedSiblings(parent);
+            const index = siblings.indexOf(pane);
+            if (index >= 0 && siblings.length === this.panes.length && siblings.every((el, i) => el === this.panes[i].el)) {
+                this.clearCollapseTimer();
+                this.activePane = pane;
+                this.applyWeights(siblings, index, isNotebookNavigator);
+                return;
+            }
+        }
+        this.reset();
+        if (isNotebookNavigator && !this.settings.notebookNavigatorSupport) return;
+        if (!parent || !parent.matches('.workspace-split, .nn-split-container')) return;
+        const siblings = this.stackedSiblings(parent);
         if (isNotebookNavigator && !this.isVerticallyStacked(parent, siblings)) return;
         if (this.settings.fullHeightEnabled || this.holdKeyDown) {
             this.expandFullHeight(pane);
@@ -137,14 +165,22 @@ export default class SidebarExpandPlugin extends Plugin {
         if (!isNotebookNavigator && parent.win.getComputedStyle(parent).flexDirection !== 'column') return;
         const index = siblings.indexOf(pane);
         if (index < 0 || siblings.length < 2) return;
-        const heights = siblings.map(el => el.offsetHeight);
-        const weights = isNotebookNavigator ? notebookNavigatorHeights(heights, index) :
-            targetHeights(heights, index, this.settings.expansionAmount);
+        // Measured once per group, before any expansion, so later re-weights
+        // start from the user's own sizes rather than the expanded ones.
+        this.heights = siblings.map(el => el.offsetHeight);
+        this.group = parent;
         this.activePane = pane;
         this.panes = siblings.map(el => ({
             el,
             values: VARIABLES.map(name => ({ value: el.style.getPropertyValue(name), priority: el.style.getPropertyPriority(name) }))
         }));
+        this.applyWeights(siblings, index, isNotebookNavigator);
+    }
+
+    private applyWeights(siblings: HTMLElement[], index: number, isNotebookNavigator: boolean): void {
+        const heights = this.heights;
+        const weights = isNotebookNavigator ? notebookNavigatorHeights(heights, index) :
+            targetHeights(heights, index, this.settings.expansionAmount);
         siblings.forEach((el, i) => {
             el.style.setProperty('--sidebar-expand-weight', String(weights[i]));
             const minimum = isNotebookNavigator ? Math.min(heights[i], Math.max(60, heights[i] * 0.2)) : Math.min(40, heights[i]);
@@ -152,6 +188,67 @@ export default class SidebarExpandPlugin extends Plugin {
             el.style.setProperty('--sidebar-expand-duration', `${this.settings.transitionDuration}ms`);
             el.classList.add('sidebar-expand-managed');
         });
+    }
+
+    /** Hovering a resize handle, or the margin around it, freezes the current
+     *  layout so the handle stays where it is while you reach for it. */
+    private isOverResizeHandle(target: Element, sidebar: HTMLElement, event: MouseEvent): boolean {
+        if (target.closest(RESIZE_SELECTOR)) return true;
+        const margin = this.settings.resizeHandleMargin;
+        if (margin <= 0) return false;
+        for (const handle of Array.from(sidebar.querySelectorAll<HTMLElement>(RESIZE_SELECTOR))) {
+            if (handle.offsetHeight <= 0 && handle.offsetWidth <= 0) continue;
+            const rect = handle.getBoundingClientRect();
+            if (event.clientX >= rect.left - margin && event.clientX <= rect.right + margin &&
+                event.clientY >= rect.top - margin && event.clientY <= rect.bottom + margin) return true;
+        }
+        return false;
+    }
+
+    private hover(event: MouseEvent): void {
+        if (this.disposed || this.resizing) return;
+        const target = event.target as Node | null;
+        if (!(target?.instanceOf(Element))) return;
+        const sidebar = target.closest<HTMLElement>('.mod-left-split, .mod-right-split');
+        if (!sidebar) {
+            this.handleGuard = false;
+            return;
+        }
+        if (this.isOverResizeHandle(target, sidebar, event)) {
+            this.handleGuard = true;
+            this.clearLeaveTimer();
+            return;
+        }
+        this.handleGuard = false;
+        const pane = target.closest<HTMLElement>(PANE_SELECTOR);
+        if (!pane) return;
+        const held = this.settings.fullHeightHoldKey !== 'None' && event.getModifierState(this.settings.fullHeightHoldKey);
+        const changed = held !== this.holdKeyDown;
+        this.holdKeyDown = held;
+        this.clearLeaveTimer();
+        if (pane !== this.activePane || changed) this.expand(pane);
+    }
+
+    /** Ease every pane back to its measured height, which is the layout Obsidian
+     *  restores, then hand sizing back once the transition has finished. */
+    private collapse(): void {
+        if (this.panes.length === 0 || this.fullHeightClasses.length > 0 || this.settings.transitionDuration <= 0) {
+            this.reset();
+            return;
+        }
+        this.activePane = null;
+        this.handleGuard = false;
+        this.panes.forEach(({ el }, i) => el.style.setProperty('--sidebar-expand-weight', String(this.heights[i])));
+        this.clearCollapseTimer();
+        this.collapseTimer = window.setTimeout(() => {
+            this.collapseTimer = null;
+            this.reset();
+        }, this.settings.transitionDuration);
+    }
+
+    private clearCollapseTimer(): void {
+        if (this.collapseTimer !== null) window.clearTimeout(this.collapseTimer);
+        this.collapseTimer = null;
     }
 
     private clearLeaveTimer(): void {
@@ -195,6 +292,8 @@ export default class SidebarExpandPlugin extends Plugin {
 
     private reset(): void {
         this.clearLeaveTimer();
+        this.clearCollapseTimer();
+        this.handleGuard = false;
         for (const { el, name } of this.fullHeightClasses) el.classList.remove(name);
         this.fullHeightClasses = [];
         for (const { el, values } of this.panes) {
@@ -206,6 +305,8 @@ export default class SidebarExpandPlugin extends Plugin {
             });
         }
         this.panes = [];
+        this.heights = [];
+        this.group = null;
         this.activePane = null;
     }
 
@@ -229,6 +330,12 @@ export default class SidebarExpandPlugin extends Plugin {
     }
 }
 
+interface SettingDefinition {
+    name: string;
+    desc: string;
+    hidden?: () => boolean;
+    render: (setting: Setting) => void;
+}
 
 class SidebarExpandSettingTab extends PluginSettingTab {
     constructor(private readonly sidebarPlugin: SidebarExpandPlugin) {
@@ -238,12 +345,13 @@ class SidebarExpandSettingTab extends PluginSettingTab {
     display(): void {
         this.containerEl.empty();
         for (const definition of this.getSettingDefinitions()) {
+            if (definition.hidden?.()) continue;
             const setting = new Setting(this.containerEl).setName(definition.name).setDesc(definition.desc);
             definition.render(setting);
         }
     }
 
-    getSettingDefinitions() {
+    getSettingDefinitions(): SettingDefinition[] {
         return [
             {
                 name: 'Full-height hover',
@@ -254,6 +362,7 @@ class SidebarExpandSettingTab extends PluginSettingTab {
                         .onChange(async value => {
                             this.sidebarPlugin.settings.fullHeightEnabled = value;
                             await this.sidebarPlugin.saveSettings();
+                            this.display();
                         }));
                 }
             },
@@ -284,6 +393,8 @@ class SidebarExpandSettingTab extends PluginSettingTab {
             {
                 name: 'Expansion amount',
                 desc: 'Extra height as a percentage of the stacked panes. Default: 12%.',
+                // Full-height hover ignores the percentage, so the slider would do nothing.
+                hidden: () => this.sidebarPlugin.settings.fullHeightEnabled,
                 render: (setting: Setting) => {
                     setting.addSlider(slider => slider
                         .setLimits(4, 50, 2)
@@ -291,6 +402,20 @@ class SidebarExpandSettingTab extends PluginSettingTab {
                         .setDynamicTooltip()
                         .onChange(async value => {
                             this.sidebarPlugin.settings.expansionAmount = value;
+                            await this.sidebarPlugin.saveSettings();
+                        }));
+                }
+            },
+            {
+                name: 'Resize handle margin',
+                desc: 'Keep the layout still within this many pixels of a resize handle so you can drag it without expanding a pane. Set to 0 to disable. Default: 6.',
+                render: (setting: Setting) => {
+                    setting.addSlider(slider => slider
+                        .setLimits(0, 24, 2)
+                        .setValue(this.sidebarPlugin.settings.resizeHandleMargin)
+                        .setDynamicTooltip()
+                        .onChange(async value => {
+                            this.sidebarPlugin.settings.resizeHandleMargin = value;
                             await this.sidebarPlugin.saveSettings();
                         }));
                 }

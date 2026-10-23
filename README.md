@@ -8,9 +8,9 @@ Expand stacked sidebar panes vertically when you hover over them. Neighbouring p
 
 1. Arrange at least two tab groups vertically in a sidebar by dragging a tab into the upper or lower part of that sidebar.
 2. Hover over a pane or its tab headers to give it more room.
-3. Move outside the group to restore its previous size. Hover expansion pauses while you drag a resize handle.
+3. Move outside the group to restore its previous size. Hovering a resize handle, or coming within a few pixels of one, holds the layout still so the handle stays where it is while you grab it, and expansion stays paused while you drag.
 
-In the plugin's settings, adjust **Expansion amount** (4–50% of the stacked panes' combined height; default 12%) and **Transition duration** (0–2000 milliseconds; default 300). Expansion is limited by the space available in neighbouring panes. The plugin respects the operating system's reduced-motion preference.
+In the plugin's settings, adjust **Expansion amount** (4–50% of the stacked panes' combined height; default 12%), **Resize handle margin** (0–24 pixels of still space around each resize handle; default 6), and **Transition duration** (0–2000 milliseconds; default 300). Expansion is limited by the space available in neighbouring panes. The plugin respects the operating system's reduced-motion preference.
 
 **Notebook Navigator support** is enabled by default. Its vertically stacked navigation and list panes expand to about 66% of their combined height when there are two panes, or 42% with three or more. Their previous custom sizes return when you move away. You can turn this support off in the plugin settings; side-by-side layouts remain unchanged.
 
@@ -19,7 +19,7 @@ In the plugin's settings, adjust **Expansion amount** (4–50% of the stacked pa
 
 - **Hold Alt / Option** while hovering to temporarily fill 100% of the sidebar's available content height, ignoring **Expansion amount**. Releasing the key returns to percentage expansion.
 - Run **Toggle full-height hover** from the command palette to switch the mode on or off. Assign your own shortcut under **Settings → Hotkeys**; the plugin does not reserve a default shortcut.
-- The **Full-height hover** settings toggle does the same thing and is saved across restarts.
+- The **Full-height hover** settings toggle does the same thing and is saved across restarts While it is on, **Expansion amount** is hidden because full-height hover ignores it.
 - Change **Full-height hold key** to Alt/Option, Control, Shift, Command/Windows, or Disabled.
 
 Full-height mode temporarily hides neighbouring panes and their resize handles, including competing nested groups. Sidebar controls and the vault footer remain available. Move outside the expanded pane to restore the layout before hovering another pane. If the toggle is enabled, releasing the hold key keeps full-height mode enabled.
