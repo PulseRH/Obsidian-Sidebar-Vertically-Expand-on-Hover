@@ -78,9 +78,9 @@ async function fixture() {
         addCommand(command) { this.command = command; }
         register(callback) { this.cleanups.push(callback); }
         registerEvent(event) { this.register(event.off); }
-        registerDomEvent(el, name, callback) {
-            el.addEventListener(name, callback);
-            this.register(() => el.removeEventListener(name, callback));
+        registerDomEvent(el, name, callback, options) {
+            el.addEventListener(name, callback, options);
+            this.register(() => el.removeEventListener(name, callback, options));
         }
         unload() { this.onunload(); this.cleanups.splice(0).forEach(callback => callback()); }
     }
@@ -432,5 +432,23 @@ test('expansion amount setting is hidden while full-height hover is on', async (
     assert.equal(amount.hidden(), false);
     f.plugin.settings.fullHeightEnabled = true;
     assert.equal(amount.hidden(), true);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('grabbing a handle releases the expansion even when the drag handler swallows the events', async () => {
+    const f = await fixture(); f.ready();
+    // Like Obsidian: stop propagation, and cancel pointerdown so no mousedown/mouseup follow.
+    f.handle.addEventListener('pointerdown', event => { event.preventDefault(); event.stopPropagation(); });
+    f.mouse(f.panes[0], 'mouseover', null, { clientY: 100 });
+    f.mouse(f.handle, 'mouseover');
+    assert.equal(f.panes[0].classList.contains('sidebar-expand-managed'), true);
+    f.handle.dispatchEvent(new f.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true }));
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.mouse(f.panes[1], 'mouseover', null, { clientY: 500 });
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.window.document.dispatchEvent(new f.window.MouseEvent('pointerup', { bubbles: true }));
+    f.flush();
+    f.mouse(f.panes[1], 'mouseover', null, { clientY: 500 });
+    assert.equal(f.panes[1].classList.contains('sidebar-expand-managed'), true);
     f.plugin.unload(); f.dom.window.close();
 });

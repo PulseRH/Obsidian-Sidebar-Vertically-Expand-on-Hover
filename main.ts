@@ -74,22 +74,32 @@ export default class SidebarExpandPlugin extends Plugin {
                 this.collapse();
             }, 50);
         });
-        this.registerDomEvent(root, 'mousedown', (event: MouseEvent) => {
+        // Release the expansion before Obsidian starts dragging, or the managed
+        // sizes override its own and the handle appears stuck until you let go.
+        // Capture phase, and pointer events too: Obsidian's drag handler may stop
+        // propagation, and cancelling pointerdown suppresses mousedown/mouseup.
+        const startResize = (event: MouseEvent): void => {
             const target = event.target as Node | null;
             if (!(target?.instanceOf(Element)) || !target.closest(RESIZE_SELECTOR)) return;
             if (!target.closest('.mod-left-split, .mod-right-split')) return;
             this.reset();
             this.resizing = true;
             if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
-        });
-        this.registerDomEvent(root.doc, 'mouseup', () => {
+            this.resizeTimer = null;
+        };
+        const endResize = (): void => {
             if (!this.resizing) return;
             if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
             this.resizeTimer = window.setTimeout(() => {
                 this.resizeTimer = null;
                 this.resizing = false;
             }, 200);
-        });
+        };
+        this.registerDomEvent(root, 'pointerdown', startResize, { capture: true });
+        this.registerDomEvent(root, 'mousedown', startResize, { capture: true });
+        this.registerDomEvent(root.doc, 'pointerup', endResize, { capture: true });
+        this.registerDomEvent(root.doc, 'pointercancel', endResize, { capture: true });
+        this.registerDomEvent(root.doc, 'mouseup', endResize, { capture: true });
         this.registerDomEvent(root.win, 'blur', () => {
             this.holdKeyDown = false;
             this.resizing = false;
