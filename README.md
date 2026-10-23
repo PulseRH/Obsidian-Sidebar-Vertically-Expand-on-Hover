@@ -19,7 +19,7 @@ In the plugin's settings, adjust **Expansion amount** (4–50% of the stacked pa
 
 - **Hold Alt / Option** while hovering to temporarily fill 100% of the sidebar's available content height, ignoring **Expansion amount**. Releasing the key returns to percentage expansion.
 - Run **Toggle full-height hover** from the command palette to switch the mode on or off. Assign your own shortcut under **Settings → Hotkeys**; the plugin does not reserve a default shortcut.
-- The **Full-height hover** settings toggle does the same thing and is saved across restarts.
+- The **Full-height hover** settings toggle does the same thing and is saved across restarts While it is on, **Expansion amount** is hidden because full-height hover ignores it.
 - Change **Full-height hold key** to Alt/Option, Control, Shift, Command/Windows, or Disabled.
 
 Full-height mode temporarily hides neighbouring panes and their resize handles, including competing nested groups. Sidebar controls and the vault footer remain available. Move outside the expanded pane to restore the layout before hovering another pane. If the toggle is enabled, releasing the hold key keeps full-height mode enabled.

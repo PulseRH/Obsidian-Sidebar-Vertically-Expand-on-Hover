@@ -15,7 +15,9 @@ export default class SidebarExpandPlugin extends Plugin {
     private activePane: HTMLElement | null = null;
     private panes: PaneState[] = [];
     private heights: number[] = [];
+    private group: HTMLElement | null = null;
     private leaveTimer: number | null = null;
+    private collapseTimer: number | null = null;
     private resizeTimer: number | null = null;
     private resizing = false;
     private disposed = false;
@@ -69,7 +71,7 @@ export default class SidebarExpandPlugin extends Plugin {
             this.clearLeaveTimer();
             this.leaveTimer = window.setTimeout(() => {
                 this.leaveTimer = null;
-                this.reset();
+                this.collapse();
             }, 50);
         });
         this.registerDomEvent(root, 'mousedown', (event: MouseEvent) => {
@@ -95,7 +97,7 @@ export default class SidebarExpandPlugin extends Plugin {
         });
         // Delegation covers new tabs; restore when an active pane moves or closes.
         const observer = new MutationObserver(() => {
-            if (this.panes.some(({ el }) => !el.isConnected || el.parentElement !== this.activePane?.parentElement) ||
+            if (this.panes.some(({ el }) => !el.isConnected || el.parentElement !== this.group) ||
                 this.fullHeightClasses.some(({ el, parent }) => !el.isConnected || el.parentElement !== parent)) {
                 this.reset();
             }
@@ -135,6 +137,7 @@ export default class SidebarExpandPlugin extends Plugin {
             const siblings = this.stackedSiblings(parent);
             const index = siblings.indexOf(pane);
             if (index >= 0 && siblings.length === this.panes.length && siblings.every((el, i) => el === this.panes[i].el)) {
+                this.clearCollapseTimer();
                 this.activePane = pane;
                 this.applyWeights(siblings, index, isNotebookNavigator);
                 return;
@@ -155,6 +158,7 @@ export default class SidebarExpandPlugin extends Plugin {
         // Measured once per group, before any expansion, so later re-weights
         // start from the user's own sizes rather than the expanded ones.
         this.heights = siblings.map(el => el.offsetHeight);
+        this.group = parent;
         this.activePane = pane;
         this.panes = siblings.map(el => ({
             el,
@@ -215,6 +219,28 @@ export default class SidebarExpandPlugin extends Plugin {
         if (pane !== this.activePane || changed) this.expand(pane);
     }
 
+    /** Ease every pane back to its measured height, which is the layout Obsidian
+     *  restores, then hand sizing back once the transition has finished. */
+    private collapse(): void {
+        if (this.panes.length === 0 || this.fullHeightClasses.length > 0 || this.settings.transitionDuration <= 0) {
+            this.reset();
+            return;
+        }
+        this.activePane = null;
+        this.handleGuard = false;
+        this.panes.forEach(({ el }, i) => el.style.setProperty('--sidebar-expand-weight', String(this.heights[i])));
+        this.clearCollapseTimer();
+        this.collapseTimer = window.setTimeout(() => {
+            this.collapseTimer = null;
+            this.reset();
+        }, this.settings.transitionDuration);
+    }
+
+    private clearCollapseTimer(): void {
+        if (this.collapseTimer !== null) window.clearTimeout(this.collapseTimer);
+        this.collapseTimer = null;
+    }
+
     private clearLeaveTimer(): void {
         if (this.leaveTimer !== null) window.clearTimeout(this.leaveTimer);
         this.leaveTimer = null;
@@ -256,6 +282,7 @@ export default class SidebarExpandPlugin extends Plugin {
 
     private reset(): void {
         this.clearLeaveTimer();
+        this.clearCollapseTimer();
         this.handleGuard = false;
         for (const { el, name } of this.fullHeightClasses) el.classList.remove(name);
         this.fullHeightClasses = [];
@@ -269,6 +296,7 @@ export default class SidebarExpandPlugin extends Plugin {
         }
         this.panes = [];
         this.heights = [];
+        this.group = null;
         this.activePane = null;
     }
 
@@ -292,6 +320,12 @@ export default class SidebarExpandPlugin extends Plugin {
     }
 }
 
+interface SettingDefinition {
+    name: string;
+    desc: string;
+    hidden?: () => boolean;
+    render: (setting: Setting) => void;
+}
 
 class SidebarExpandSettingTab extends PluginSettingTab {
     constructor(private readonly sidebarPlugin: SidebarExpandPlugin) {
@@ -301,12 +335,13 @@ class SidebarExpandSettingTab extends PluginSettingTab {
     display(): void {
         this.containerEl.empty();
         for (const definition of this.getSettingDefinitions()) {
+            if (definition.hidden?.()) continue;
             const setting = new Setting(this.containerEl).setName(definition.name).setDesc(definition.desc);
             definition.render(setting);
         }
     }
 
-    getSettingDefinitions() {
+    getSettingDefinitions(): SettingDefinition[] {
         return [
             {
                 name: 'Full-height hover',
@@ -317,6 +352,7 @@ class SidebarExpandSettingTab extends PluginSettingTab {
                         .onChange(async value => {
                             this.sidebarPlugin.settings.fullHeightEnabled = value;
                             await this.sidebarPlugin.saveSettings();
+                            this.display();
                         }));
                 }
             },
@@ -347,6 +383,8 @@ class SidebarExpandSettingTab extends PluginSettingTab {
             {
                 name: 'Expansion amount',
                 desc: 'Extra height as a percentage of the stacked panes. Default: 12%.',
+                // Full-height hover ignores the percentage, so the slider would do nothing.
+                hidden: () => this.sidebarPlugin.settings.fullHeightEnabled,
                 render: (setting: Setting) => {
                     setting.addSlider(slider => slider
                         .setLimits(4, 50, 2)

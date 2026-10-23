@@ -96,8 +96,10 @@ async function fixture() {
     await plugin.onload();
     const mouse = (el, name, relatedTarget = null, modifiers = {}) => el.dispatchEvent(new window.MouseEvent(name, { bubbles: true, relatedTarget, ...modifiers }));
     const key = (name, key, modifiers = {}) => window.document.dispatchEvent(new window.KeyboardEvent(name, { key, bubbles: true, ...modifiers }));
-    const flush = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); };
-    return { dom, window, root, panes, handle, plugin, timers, mouse, key, flush, ready: () => ready(), layout: () => layoutCallback?.() };
+    // step runs the timers pending now; flush keeps going until none are left.
+    const step = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(callback => callback()); };
+    const flush = () => { while (timers.size) step(); };
+    return { dom, window, root, panes, handle, plugin, timers, mouse, key, step, flush, ready: () => ready(), layout: () => layoutCallback?.() };
 }
 
 test('hovering headers expands; leaving restores exact inline sizing and priorities', async () => {
@@ -398,5 +400,37 @@ test('moving between panes of an expanded group re-weights without snapping back
     assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
     f.mouse(f.panes[1], 'mouseout'); f.flush();
     assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('leaving the sidebar eases panes back to their own sizes before handing sizing back', async () => {
+    const f = await fixture(); f.ready();
+    const before = f.panes.map(el => el.style.cssText);
+    f.mouse(f.panes[0], 'mouseover');
+    f.mouse(f.panes[0], 'mouseout'); f.step();
+    assert.ok(f.panes.every(el => el.classList.contains('sidebar-expand-managed')));
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '400');
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '200');
+    assert.equal(f.timers.size, 1);
+    f.step();
+    assert.deepEqual(f.panes.map(el => el.style.cssText), before);
+    // Coming back mid-collapse picks the animation up instead of snapping.
+    f.mouse(f.panes[0], 'mouseover');
+    f.mouse(f.panes[0], 'mouseout'); f.step();
+    f.mouse(f.panes[1], 'mouseover');
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
+    f.plugin.settings.transitionDuration = 0;
+    f.mouse(f.panes[1], 'mouseout'); f.step();
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.plugin.unload(); f.dom.window.close();
+});
+
+test('expansion amount setting is hidden while full-height hover is on', async () => {
+    const f = await fixture(); f.ready();
+    const amount = f.plugin.tab.getSettingDefinitions().find(definition => definition.name === 'Expansion amount');
+    assert.equal(amount.hidden(), false);
+    f.plugin.settings.fullHeightEnabled = true;
+    assert.equal(amount.hidden(), true);
     f.plugin.unload(); f.dom.window.close();
 });
