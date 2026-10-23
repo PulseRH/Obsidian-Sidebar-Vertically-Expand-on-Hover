@@ -1,0 +1,56 @@
+name: Release
+
+# Publishes a GitHub release whenever main carries a manifest version that has
+# no release yet. Obsidian's plugin browser installs the latest release's assets.
+on:
+  push:
+    branches: [main]
+    paths: [manifest.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Read version
+        id: version
+        run: echo "version=$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Check for an existing release
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Lint, build and test
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          npm ci
+          npm run check
+      - name: Publish release
+        if: steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          notes=".github/release-notes/$VERSION.md"
+          if [ -f "$notes" ]; then
+            title="$(head -n 1 "$notes" | sed 's/^# *//')"
+            tail -n +2 "$notes" > release-body.md
+            gh release create "$VERSION" main.js manifest.json styles.css \
+              --target "$GITHUB_SHA" --title "$title" --notes-file release-body.md
+          else
+            gh release create "$VERSION" main.js manifest.json styles.css \
+              --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
+          fi

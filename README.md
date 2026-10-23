@@ -66,7 +66,7 @@ Production output is readable, unminified JavaScript. Dependencies are developme
 
 ## Releases
 
-Run `npm run check`, then use `npm version patch` to update package, manifest, and compatibility versions together. Push the commit and tag, and create a GitHub release containing `main.js`, `manifest.json`, and `styles.css` as individual attachments. The release tag must match `manifest.json` exactly, without a `v` prefix.
+Run `npm run check`, then `npm version <patch|minor|major> --no-git-tag-version` to update package, manifest, and compatibility versions together. Add release notes to `.github/release-notes/<version>.md`, with the release title on the first line. Once the version bump is merged into `main`, the Release workflow builds and tests the plugin and publishes a GitHub release tagged with the exact `manifest.json` version, without a `v` prefix, with `main.js`, `manifest.json`, and `styles.css` attached. Run it manually from the Actions tab if needed; it skips versions that already have a release.
 
 ## License
 
