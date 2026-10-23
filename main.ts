@@ -14,6 +14,7 @@ export default class SidebarExpandPlugin extends Plugin {
     settings: SidebarExpandSettings = normalizeSettings(null);
     private activePane: HTMLElement | null = null;
     private panes: PaneState[] = [];
+    private heights: number[] = [];
     private leaveTimer: number | null = null;
     private resizeTimer: number | null = null;
     private resizing = false;
@@ -113,17 +114,36 @@ export default class SidebarExpandPlugin extends Plugin {
         return parent.win.getComputedStyle(parent).flexDirection === 'column';
     }
 
-    private expand(pane: HTMLElement): void {
-        this.reset();
-        const isNotebookNavigator = pane.matches(NN_PANE_SELECTOR);
-        if (isNotebookNavigator && !this.settings.notebookNavigatorSupport) return;
-        const parent = pane.parentElement;
-        if (!parent || !parent.matches('.workspace-split, .nn-split-container')) return;
-        const siblings = Array.from(parent.children).filter((el): el is HTMLElement =>
+    private stackedSiblings(parent: HTMLElement): HTMLElement[] {
+        return Array.from(parent.children).filter((el): el is HTMLElement =>
             el.instanceOf(HTMLElement) &&
             el.matches('.workspace-tabs, .workspace-split, .nn-navigation-pane, .nn-list-pane') &&
             el.offsetHeight > 0
         );
+    }
+
+    private expand(pane: HTMLElement): void {
+        const isNotebookNavigator = pane.matches(NN_PANE_SELECTOR);
+        const parent = pane.parentElement;
+        // Moving to another pane of the group that is already expanded only
+        // re-weights it. Resetting first would snap the old pane back to its
+        // original size for a frame before the new one starts growing.
+        if (parent && this.panes.length > 0 && this.fullHeightClasses.length === 0 &&
+            !this.settings.fullHeightEnabled && !this.holdKeyDown &&
+            !(isNotebookNavigator && !this.settings.notebookNavigatorSupport) &&
+            parent === this.panes[0].el.parentElement) {
+            const siblings = this.stackedSiblings(parent);
+            const index = siblings.indexOf(pane);
+            if (index >= 0 && siblings.length === this.panes.length && siblings.every((el, i) => el === this.panes[i].el)) {
+                this.activePane = pane;
+                this.applyWeights(siblings, index, isNotebookNavigator);
+                return;
+            }
+        }
+        this.reset();
+        if (isNotebookNavigator && !this.settings.notebookNavigatorSupport) return;
+        if (!parent || !parent.matches('.workspace-split, .nn-split-container')) return;
+        const siblings = this.stackedSiblings(parent);
         if (isNotebookNavigator && !this.isVerticallyStacked(parent, siblings)) return;
         if (this.settings.fullHeightEnabled || this.holdKeyDown) {
             this.expandFullHeight(pane);
@@ -132,14 +152,21 @@ export default class SidebarExpandPlugin extends Plugin {
         if (!isNotebookNavigator && parent.win.getComputedStyle(parent).flexDirection !== 'column') return;
         const index = siblings.indexOf(pane);
         if (index < 0 || siblings.length < 2) return;
-        const heights = siblings.map(el => el.offsetHeight);
-        const weights = isNotebookNavigator ? notebookNavigatorHeights(heights, index) :
-            targetHeights(heights, index, this.settings.expansionAmount);
+        // Measured once per group, before any expansion, so later re-weights
+        // start from the user's own sizes rather than the expanded ones.
+        this.heights = siblings.map(el => el.offsetHeight);
         this.activePane = pane;
         this.panes = siblings.map(el => ({
             el,
             values: VARIABLES.map(name => ({ value: el.style.getPropertyValue(name), priority: el.style.getPropertyPriority(name) }))
         }));
+        this.applyWeights(siblings, index, isNotebookNavigator);
+    }
+
+    private applyWeights(siblings: HTMLElement[], index: number, isNotebookNavigator: boolean): void {
+        const heights = this.heights;
+        const weights = isNotebookNavigator ? notebookNavigatorHeights(heights, index) :
+            targetHeights(heights, index, this.settings.expansionAmount);
         siblings.forEach((el, i) => {
             el.style.setProperty('--sidebar-expand-weight', String(weights[i]));
             const minimum = isNotebookNavigator ? Math.min(heights[i], Math.max(60, heights[i] * 0.2)) : Math.min(40, heights[i]);
@@ -241,6 +268,7 @@ export default class SidebarExpandPlugin extends Plugin {
             });
         }
         this.panes = [];
+        this.heights = [];
         this.activePane = null;
     }
 

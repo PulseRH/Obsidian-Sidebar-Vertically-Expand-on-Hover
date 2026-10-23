@@ -59,7 +59,7 @@ async function fixture() {
     window.clearTimeout = id => timers.delete(id);
     const root = window.document.querySelector('#workspace');
     const panes = [...root.querySelectorAll('.mod-left-split > .workspace-tabs')];
-    panes.forEach((el, i) => Object.defineProperty(el, 'offsetHeight', { get: () => i ? 200 : 400 }));
+    panes.forEach((el, i) => Object.defineProperty(el, 'offsetHeight', { get: () => i ? 200 : 400, configurable: true }));
     const handle = root.querySelector('.workspace-leaf-resize-handle');
     Object.defineProperty(handle, 'offsetHeight', { get: () => 4 });
     handle.getBoundingClientRect = () => ({ left: 0, right: 300, top: 400, bottom: 404, width: 300, height: 4 });
@@ -379,4 +379,24 @@ test('handle margin is bounded and defaults to six pixels', () => {
     assert.equal(normalizeSettings({ resizeHandleMargin: 99 }).resizeHandleMargin, 24);
     assert.equal(normalizeSettings({ resizeHandleMargin: -5 }).resizeHandleMargin, 0);
     assert.equal(normalizeSettings({ resizeHandleMargin: 'x' }).resizeHandleMargin, 6);
+});
+
+test('moving between panes of an expanded group re-weights without snapping back first', async () => {
+    const f = await fixture(); f.ready();
+    f.mouse(f.panes[0], 'mouseover');
+    const removed = [];
+    f.panes.forEach(el => {
+        const remove = el.classList.remove.bind(el.classList);
+        el.classList.remove = (...names) => { removed.push(...names); remove(...names); };
+        // Expanded sizes must not be mistaken for the user's own sizes.
+        Object.defineProperty(el, 'offsetHeight', { get: () => el === f.panes[0] ? 472 : 128 });
+    });
+    f.mouse(f.panes[0], 'mouseout', f.panes[1]);
+    f.mouse(f.panes[1], 'mouseover');
+    assert.deepEqual(removed, []);
+    assert.equal(f.panes[0].style.getPropertyValue('--sidebar-expand-weight'), '328');
+    assert.equal(f.panes[1].style.getPropertyValue('--sidebar-expand-weight'), '272');
+    f.mouse(f.panes[1], 'mouseout'); f.flush();
+    assert.equal(f.root.querySelectorAll('.sidebar-expand-managed').length, 0);
+    f.plugin.unload(); f.dom.window.close();
 });
